@@ -1,30 +1,148 @@
-seed:
-max_peaks: 100
-epochs: 1
-steps_per_report: 10000
-max_steps: 1e10
+eval_only: False
 batch_size: 100
-lr: 1e-4
-tasks:
-  #- trinary_mz
-  #- trinary_ab
-  #- hidden_mz
-  #- hidden_ab
-  #- hidden_spectrum
-  #- hidden_charge
-  #- hidden_mass
-  #- maldi
-  - resid_regr
-downstream:
-  #- denovo_ar
+top_peaks: 100
+pep_length: [0, 40]
+epochs: 20
 
-log_wandb: False
-project: diffusion
-load: False
-loadpath: save/2024-03-23_18-49-24.152971/weights/
-log: False
-svwts: False
-svfreq: 1800
-svgrad: False
-debug: False
-header: "Diffusion w/ AR model hyperparameters (lr and dropout)"
+# Learning rate
+lr: 0.0001
+lr_warmup: True
+lr_warmup_start: 1.0e-6
+lr_warmup_end: 1.0e-4
+lr_warmup_steps: 20000
+
+# Loading previous weights
+prev_wts: # Load weights from previous run (project path->timestamp)
+load_last: False
+
+# Logging and saving weights
+log_wandb: True
+wandb_entity: joellapin
+wandb_project: diffusion
+save_weights: True
+high_score: aa_recall
+
+# Loader options
+loader:
+  dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
+  val_species: saccharomyces_cerevisiae
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
+  buffer_size: 10000
+  batch_size: 100
+  num_workers: 8
+  val_steps: 100
+  remove_columns:
+    - 'evidence_index'
+    - 'scan_number'
+    - 'sequence'
+    - 'precursor_mz'
+    - 'retention_time'
+    - 'title'
+    - 'scans'
+  scratch:
+    use: False
+    path: /media/storage/scratch/ninespecies/
+
+# Models
+encoder_name: mine # depthcharge | {other}
+decoder_name:  diff # *diff* | *
+
+# Encoder model
+
+encoder_dict:
+  norm_type: 'layer'
+  mz_units: 1024
+  ab_units: 256
+  subdivide: False
+  running_units: 512
+  att_d: 64
+  att_h: 8
+  gate: False
+  alphabet: False
+  depth: 9
+  ffn_multiplier: 2
+  prenorm: True
+  prec_type: inject_pre
+  use_charge: False
+  use_mass: False
+  bias: # 'pairwise' | 'regular' | False | None
+  dropout: 0.25
+  recycling_its: 1
+  pw_mz_units: 512
+  pw_run_units: 64
+  pw_attention_ch: 32
+  pw_attention_h: 2
+  pw_n: 4
+  pw_blocks: 0
+
+# Decoder model
+
+decoder_ar:
+  running_units: 512
+  max_sequence_length: 100
+  depth: 9
+  d: 64
+  h: 8
+  ffn_multiplier: 2
+  ce_units: 256
+  use_charge: True
+  use_energy: False
+  use_mass: True
+  prec_type: 'inject_pre' # inject_pre | inject_ffn | inject_norm | pretoken | posttoken | None
+  norm_type: 'layer'
+  prenorm: True
+  preembed: True
+  penultimate_units:
+  pool: False
+  dropout: 0.25
+  alphabet: False
+
+decoder_diff:
+  diffusion_config:
+    sequence_len: 21
+    learn_sigma: False
+    sigma_small: False
+    sigma_weight: 1.0 # vlb_weight
+    class_cond: False
+    diffusion_steps: 200
+    noise_schedule: mine
+    timestep_respacing: ""
+    use_kl: False
+    predict_xstart: True
+    clip_denoised: False
+    rescale_timesteps: True
+    rescale_learned_sigmas: True
+    use_checkpoint: False
+    model_arch: transformer
+    in_channel: 512
+    out_channel: 512
+    logits_mode: 1
+    training_mode: diffusion-lm
+    init_pretrained: False
+    freeze_embeddings: False
+    use_pretrained_embeddings: True
+    load_ckpt:
+    loss_update_granu: 20
+    schedule_update_stride: 2000000
+    use_loss_mask: False
+  model_config:
+    running_units: 512
+    sequence_length: 30
+    depth: 9
+    d: 64
+    h: 8
+    ffn_multiplier: 2
+    ce_units: 256
+    use_charge: True
+    use_energy: False
+    use_mass: True
+    prec_type: None
+    norm_type: 'layer'
+    prenorm: True
+    preembed: True
+    penultimate_units:
+    pool: False
+    dropout: 0
+    alphabet: False
+    self_condition: True
+

@@ -275,7 +275,7 @@ class Decoder(nn.Module):
 
         return out
 
-class DenovoDecoder:
+class DenovoDecoder(nn.Module):
     def __init__(self, 
         token_dict, 
         dec_config, 
@@ -287,6 +287,7 @@ class DenovoDecoder:
         precursor_mass_tol=50,
         top_match=1,
     ):
+        super(DenovoDecoder, self).__init__()
         
         self.outdict = deepcopy(token_dict)
         self.inpdict = deepcopy(token_dict)
@@ -309,6 +310,7 @@ class DenovoDecoder:
         self.dec_config = dec_config
         dec_config['max_sequence_length'] = dec_config['max_sequence_length'] + 1 # padded to accomodate <EOS> token on longest desired sequence
         self.decoder = Decoder(**dec_config)
+        self.sequence_mask = self.decoder.sequence_mask
         self.use_mass = dec_config['use_mass']
         self.use_charge = dec_config['use_charge']
         self.max_sl = dec_config['max_sequence_length']
@@ -336,12 +338,6 @@ class DenovoDecoder:
 
     def load_weights(self, fp='./decoder.wts', device=th.device('cpu')):
         self.decoder.load_state_dict(th.load(fp, map_location=device))
-    
-    def train(self):
-        self.decoder.train()
-
-    def eval(self):
-        self.decoder.eval()
     
     def detokenize(self, intseq):
         """1 peptide at a time"""
@@ -496,12 +492,11 @@ class DenovoDecoder:
 
         return rank, prob
 
-    def __call__(self, 
+    def forward(self, 
                  intseq, 
                  enc_out, 
                  batdic,
                  causal=False,
-                 training=False, 
                  softmax=False,
                  ):
         dec_inp = self.decinp(
@@ -512,13 +507,6 @@ class DenovoDecoder:
             energy=None,
             device=self.decoder.pos.device
         )
-
-        if training:
-            self.decoder.train()
-        else:
-            self.decoder.eval()
-        
-        #seq_mask = self.decoder.sequence_mask(batdic['seqlen'])
 
         output = self.decoder(**dec_inp)
         
