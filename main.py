@@ -127,38 +127,29 @@ class DownstreamObj:
         pbar = tqdm(self.data.dataloader['train'], total=train_steps)
 
         epoch_start = time()
-        step_end=epoch_start;split1=epoch_start;split2=epoch_start;split3=epoch_start
-        for step, batch in enumerate(pbar):
-            
-            if step == 10:
-                break
-
+        step_end=epoch_start
+        for step, batch in enumerate(pbar):      
             step_start = time()
-            #running_time[0].append(step_start - step_end)
             
             if self.config['log_wandb']: wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
 
             losses = self.train_step(batch)
             self.global_step += 1
-            split1 = time()
             
-            for key in running_loss.keys(): running_loss[key].append(losses[key].detach().cpu())
-            split2 = time()
-            
-            rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
-            split3 = time()
             if self.config['log_wandb']:
-                loss_printout = 'Loss: %7f'%rlm['loss']
+                loss_printout = 'Loss: %7f'%losses['loss']
             else:
+                for key in running_loss.keys(): running_loss[key].append(losses[key].detach().cpu())
+                rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
                 loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
-            pbar.set_description(f"Running Loss: {loss_printout}")
+            pbar.set_description(f"Loss: {loss_printout}")
 
             if self.config['log_wandb']:
                 global_grad_norm = U.global_grad_norm(self.model)
-                self.log_wandb(losses, rlm, global_grad_norm)
+                self.log_wandb(losses, global_grad_norm)
                 
 
-            self.running_loss.append(rlm['loss'])
+            self.running_loss.append(losses['loss'].detach().cpu())
             if self.log and (self.global_step % svfreq == 0):
                 self.savetxt(self.running_loss)
                 self.running_loss = []
@@ -587,24 +578,17 @@ class DenovoDiffusionObj(BaseDenovo):
         
         return losses
     
-    def log_wandb(self, losses, rlm, grad_norm):
+    def log_wandb(self, losses, grad_norm):
         wandb.log({
             "Total loss": losses['loss'],
-            "Total run loss": rlm['loss'],
             "MSE loss": losses['mse'],
-            "MSE run loss": rlm['mse'],
             "DecoderNLL loss": losses['decoder_nll'],
-            "DecoderNLL run loss": rlm['decoder_nll'],
             "tT loss": losses['tT'],
-            "tT run loss": rlm['tT'],
             'Global step': self.global_step,
             "Global grad norm": grad_norm,
         })
         if 'vlb_terms' in losses:
-            wandb.log({
-                'VLB loss': losses['vlb_terms'],
-                'VLB run loss': rlm['vlb_terms'],
-            })
+            wandb.log({'VLB loss': losses['vlb_terms'],})
    
     def on_train_epoch_end(self):
         avg_losses = self.model.diff_obj.my_loss_history / (self.model.diff_obj.my_loss_count+1e-7)[...,None]

@@ -67,15 +67,23 @@ exceptions = {
 
 class LoaderHF:
     def __init__(self, 
-        dataset_path: str,
-        val_species: str=None,
+        train_dataset_path: str,
+        val_dataset_path: str=None,
+        val_name: str=None,
         dictionary_path: str=None,
+        masses_path: str=None,
         tokenizer_path: str=None,
+        test_split_method: str='full_val',
         top_pks: int=100,
         batch_size: int=100,
         num_workers: int=0,
         **kwargs
     ):
+        if val_dataset_path is None:
+            val_dataset_path = train_dataset_path
+        if masses_path is None:
+            masses_path = train_dataset_path
+        tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
 
         # Scratch directory
         if 'scratch' in kwargs.keys():
@@ -99,52 +107,96 @@ class LoaderHF:
             self.amod_dic_rev = {b:a for a,b in self.amod_dic.items()}
 
         # Dictionary masses
-        masses_path = os.path.join(dataset_path, "ns_masses.txt")
-        if os.path.exists(masses_path):
-            mass_frame = pd.read_csv(masses_path, delimiter=" ", header=None)
+        # - RULES
+        #   1. There is a file that matches the regex *masses.txt in the masses_path
+        try:
+            masses_path = glob(os.path.join(masses_path, "*masses.tsv"))[0]
+            mass_frame = pd.read_csv(masses_path, delimiter="\t", header=None)
             self.massdic = {m:n for m,n in zip(mass_frame[0], mass_frame[1])}
+        except:
+            pass
 
-        # Species sizes
-        ss_path = os.path.join(dataset_path, "species_sizes.txt")
-        if os.path.exists(ss_path):
-            species_sizes = pd.read_csv(ss_path, sep=" ", header=None, names=["species", "count"], index_col="species")
-            self.val_size = int(species_sizes.query(f"species == '{val_species}'")['count'].iloc[0])
-            self.train_size = int(species_sizes.query(f"species != '{val_species}'")['count'].sum())
+        # Split sizes
+        # - RULES
+        #   1. There is a file that matches the regex *sizes.tsv in the train_dataset_path and val_dataset_path
+        #   2. val_name will pick out 1 file's size from the val_dataset_path
+        
+        ss_train_path = os.path.join(train_dataset_path, "*sizes.tsv")
+        ss_train_path = glob(ss_train_path)[0]
+        if os.path.exists(ss_train_path):
+            train_split_sizes = pd.read_csv(ss_train_path, sep="\t", header=None, names=["name", "count"], index_col="name")
+            # search train_split_sizes based on val_name to accomodate 9 species 
+            # cross validation where val and train are in the same directory
+            self.train_size = int(train_split_sizes.query(f"name != '{val_name}'")['count'].sum())
         else:
-            None
+            # This should still work with tqdm progress bar
+            self.train_size = float('inf')
+        
+        ss_val_path = os.path.join(val_dataset_path, "*sizes.tsv")
+        ss_val_path = glob(ss_val_path)[0]
+        if os.path.exists(ss_val_path):
+            val_split_sizes = pd.read_csv(ss_val_path, sep='\t', header=None, names=['name', 'count'], index_col="name")
+            self.val_size = int(val_split_sizes.query(f"name == '{val_name}'")['count'].iloc[0])
+        else:
+            # This should still work with tqdm progress bar
+            self.train_size = float('inf')
+            self.val_size = float('inf')
 
         # Dataset
-        dataset_path_ = os.path.join(dataset_path, "parquet/processed")
-        train_files = glob(os.path.join(dataset_path_, '*'))
-        val_files = glob(os.path.join(dataset_path_, f"*{val_species}*"))
+        # - RULES
+        #   1. The *_directory_path will contain its data in a directory named "parquet/processed"
+        #   2. val_name only has to be somewhere in the filename -> *val_name*
+        # Read all files
+        train_dataset_path_ = os.path.join(train_dataset_path, "parquet/processed", "*")
+        train_files = glob(train_dataset_path_)
+        # Read only files matching *val_name*
+        val_dataset_path_ = os.path.join(val_dataset_path, "parquet/processed", f"*{val_name}*")
+        val_files = glob(val_dataset_path_)
+        # If val files are in same directory as train files
         for val_file in val_files:
             train_files.remove(val_file)
         data_files = {'train': train_files, 'val': val_files,}
+        
         dataset = load_dataset(
             'parquet',
             data_files=data_files,
             streaming=True
         )
-        dataset['test'] = dataset['val']
+
+        # Map to format outputs
+        lambda_function = lambda example: map_fn(
+            example,
+            tokenizer=self.tokenizer,
+            dic=self.amod_dic,
+            top=top_pks, 
+            max_seq=max_seq
+        )
+        if 'remove_columns' in kwargs:
+            remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
+            remove_val_columns = [column for column in kwargs['remove_columns'] if column in dataset['val'].features]
+        dataset['train'] = dataset['train'].map(
+            lambda_function, 
+            remove_columns=remove_train_columns,
+        )
+        dataset['val'] = dataset['val'].map(
+            lambda_function,
+            remove_columns=remove_val_columns,
+        )
+
+        # Create test from val
+        if test_split_method == 'full_val':
+            dataset['test'] = dataset['val']
+        elif test_split_method == 'every_other':
+            dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
+            dataset['test'] = dataset['test'].filter(lambda example, idx: idx % every_n == 1, with_indices=True)
         
         # Tokenizer
-        tokenizer_path = dataset_path if tokenizer_path==None else tokenizer_path
+        # - RULES
+        #   1. There is a file named enumerate_tokens.py with a subroutine named
+        #      partition_modified_sequence
         sys.path.append(tokenizer_path)
         from enumerate_tokens import partition_modified_sequence
         self.tokenizer = partition_modified_sequence
-
-        # Map to format outputs
-        dataset = dataset.map(
-            lambda example: 
-            map_fn(
-                example,
-                tokenizer=self.tokenizer,
-                dic=self.amod_dic,
-                top=top_pks, 
-                max_seq=max_seq
-            ), 
-            remove_columns=kwargs['remove_columns'] if 'remove_columns' in kwargs else None,
-        )
 
         # Filter for length
         if 'pep_length' in kwargs.keys():

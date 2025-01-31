@@ -2,7 +2,7 @@ eval_only: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 20
+epochs: 80
 
 # Learning rate
 lr: 0.0001
@@ -16,16 +16,16 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 
 # Logging and saving weights
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
-save_weights: True
+save_weights: False
 high_score: aa_recall
 
 # Loader options
 loader:
-  dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
-  val_species: saccharomyces_cerevisiae
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
+  val_name: saccharomyces_cerevisiae
   dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
   buffer_size: 10000
   batch_size: 100
