@@ -651,7 +651,7 @@ if __name__ == '__main__':
             entity=config['wandb_entity'],
 			config={
 				'master': config,
-                'save_directory': svdir,
+                'save_directory': timestamp,
                 'model_parameters': D.model.total_params(),
 			},
 		)   

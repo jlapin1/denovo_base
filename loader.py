@@ -68,6 +68,7 @@ exceptions = {
 class LoaderHF:
     def __init__(self, 
         train_dataset_path: str,
+        train_name: str=None,
         val_dataset_path: str=None,
         val_name: str=None,
         dictionary_path: str=None,
@@ -84,6 +85,7 @@ class LoaderHF:
         if masses_path is None:
             masses_path = train_dataset_path
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
+        max_seq = kwargs['pep_length'][1] if 'pep_length' in kwargs.keys() else None
 
         # Scratch directory
         if 'scratch' in kwargs.keys():
@@ -125,9 +127,14 @@ class LoaderHF:
         ss_train_path = glob(ss_train_path)[0]
         if os.path.exists(ss_train_path):
             train_split_sizes = pd.read_csv(ss_train_path, sep="\t", header=None, names=["name", "count"], index_col="name")
+            # if none, then read everything except for val_name
             # search train_split_sizes based on val_name to accomodate 9 species 
-            # cross validation where val and train are in the same directory
-            self.train_size = int(train_split_sizes.query(f"name != '{val_name}'")['count'].sum())
+            #  cross validation where val and train are in the same directory
+            if train_name == None:
+                self.train_size = int(train_split_sizes.query(f"name.str.contains('{val_name}')==False")['count'].sum())
+            # else affirmatively find files that contain train_name
+            else:
+                self.train_size = int(train_split_sizes.query(f"name.str.contains('{train_name}')")['count'].sum())
         else:
             # This should still work with tqdm progress bar
             self.train_size = float('inf')
@@ -136,7 +143,7 @@ class LoaderHF:
         ss_val_path = glob(ss_val_path)[0]
         if os.path.exists(ss_val_path):
             val_split_sizes = pd.read_csv(ss_val_path, sep='\t', header=None, names=['name', 'count'], index_col="name")
-            self.val_size = int(val_split_sizes.query(f"name == '{val_name}'")['count'].iloc[0])
+            self.val_size = int(val_split_sizes.query(f"name.str.contains('{val_name}')")['count'].sum())
         else:
             # This should still work with tqdm progress bar
             self.train_size = float('inf')
@@ -147,21 +154,30 @@ class LoaderHF:
         #   1. The *_directory_path will contain its data in a directory named "parquet/processed"
         #   2. val_name only has to be somewhere in the filename -> *val_name*
         # Read all files
-        train_dataset_path_ = os.path.join(train_dataset_path, "parquet/processed", "*")
+        regex = "*" if train_name == None else f"*{train_name}*"
+        train_dataset_path_ = os.path.join(train_dataset_path, "parquet/processed", regex)
         train_files = glob(train_dataset_path_)
         # Read only files matching *val_name*
         val_dataset_path_ = os.path.join(val_dataset_path, "parquet/processed", f"*{val_name}*")
         val_files = glob(val_dataset_path_)
         # If val files are in same directory as train files
         for val_file in val_files:
-            train_files.remove(val_file)
+            if val_file in train_files: train_files.remove(val_file)
+        print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
+        print(f"<LOADcomMENT> Found {len(val_files)} file(s) for validation")
         data_files = {'train': train_files, 'val': val_files,}
         
         dataset = load_dataset(
             'parquet',
-            data_files=data_files,
+            data_files={'train': data_files['train']},
             streaming=True
         )
+        dataset_val = load_dataset(
+            'parquet',
+            data_files={'val': data_files['val']},
+            streaming=True,
+        )
+        dataset['val'] = dataset_val['val']
 
         # Map to format outputs
         lambda_function = lambda example: map_fn(
@@ -205,9 +221,6 @@ class LoaderHF:
                 (len(example['tokenized_sequence']) >= kwargs['pep_length'][0]) &
                 (len(example['tokenized_sequence']) <= kwargs['pep_length'][1])
             )
-            max_seq = kwargs['pep_length'][1]
-        else:
-            max_seq = None
         
         # Filter for charge
         if 'charge' in kwargs.keys():

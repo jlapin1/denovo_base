@@ -24,12 +24,15 @@ high_score: aa_recall
 
 # Loader options
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  train_name: 'train'
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
   val_name: saccharomyces_cerevisiae
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
+  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/ns_dictionary.txt
   buffer_size: 10000
   batch_size: 100
-  num_workers: 8
+  num_workers: 15
   val_steps: 100
   remove_columns:
     - 'evidence_index'
