@@ -164,7 +164,7 @@ class LoaderHF:
         for val_file in val_files:
             if val_file in train_files: train_files.remove(val_file)
         print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
-        print(f"<LOADcomMENT> Found {len(val_files)} file(s) for validation")
+        print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
         data_files = {'train': train_files, 'val': val_files,}
         
         dataset = load_dataset(

@@ -315,7 +315,6 @@ class DenovoDecoder(nn.Module):
         self.use_charge = dec_config['use_charge']
         self.max_sl = dec_config['max_sequence_length']
 
-        self.state_dict = lambda: self.decoder.state_dict()
         self.encoder = encoder
         
         # Beam search

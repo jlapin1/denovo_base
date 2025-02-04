@@ -473,10 +473,9 @@ class DenovoArDSObj(BaseDenovo):
         
         return {'loss': loss}
 
-    def log_wandb(self, losses, rlm, norm):
+    def log_wandb(self, losses, norm):
         wandb.log({
             "Total loss": losses['loss'],
-            "Total run loss": rlm['loss'],
             'Global step': self.global_step,
             "Global grad norm": norm,
         })
@@ -623,7 +622,8 @@ if __name__ == '__main__':
         # Replace previous settings with new ones
         for key in [
             'epochs', 'prev_wts', 'load_last', 'lr', 'lr_warmup', 
-            'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps'
+            'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
+            'loader', 'log_wandb', 'eval_only',
         ]:
             config[key] = config_[key]
     # Create new experiment

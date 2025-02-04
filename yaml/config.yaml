@@ -5,7 +5,7 @@ pep_length: [0, 40]
 epochs: 80
 
 # Learning rate
-lr: 0.0001
+lr: 0.00015
 lr_warmup: True
 lr_warmup_start: 1.0e-6
 lr_warmup_end: 1.0e-4
@@ -16,23 +16,23 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 
 # Logging and saving weights
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
-save_weights: False
+save_weights: True
 high_score: aa_recall
 
 # Loader options
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  train_name: 'train'
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
+  train_name:
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
   val_name: saccharomyces_cerevisiae
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/ns_dictionary.txt
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
   buffer_size: 10000
   batch_size: 100
-  num_workers: 15
+  num_workers: 9
   val_steps: 100
   remove_columns:
     - 'evidence_index'
@@ -48,7 +48,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name:  diff # *diff* | *
+decoder_name:  ar # *diff* | *
 
 # Encoder model
 
@@ -97,7 +97,7 @@ decoder_ar:
   preembed: True
   penultimate_units:
   pool: False
-  dropout: 0.25
+  dropout: 0.15
   alphabet: False
 
 decoder_diff:
