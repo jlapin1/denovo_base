@@ -5,7 +5,7 @@ pep_length: [0, 40]
 epochs: 80
 
 # Learning rate
-lr: 0.00015
+lr: 0.0002
 lr_warmup: True
 lr_warmup_start: 1.0e-6
 lr_warmup_end: 1.0e-4
@@ -31,7 +31,6 @@ loader:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
   buffer_size: 10000
-  batch_size: 100
   num_workers: 9
   val_steps: 100
   remove_columns:
@@ -97,7 +96,7 @@ decoder_ar:
   preembed: True
   penultimate_units:
   pool: False
-  dropout: 0.15
+  dropout: 0.25
   alphabet: False
 
 decoder_diff:

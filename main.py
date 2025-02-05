@@ -187,8 +187,12 @@ class BaseDenovo(DownstreamObj):
             self.val_steps = 1 if val_steps == None else val_steps # backwards compatiblity
         else:
             self.val_steps = 100
-        self.data = LoaderHF(top_pks=config['top_peaks'], pep_length=config['pep_length'], **self.config['loader'])
-        self.predcats = np.max(list(self.data.amod_dic.values())) + 1
+        self.data = LoaderHF(
+            top_pks=config['top_peaks'], 
+            pep_length=config['pep_length'],
+            batch_size=config['batch_size'],
+            **self.config['loader']
+        )
 
         self.eval_stats = []
 
@@ -215,6 +219,7 @@ class BaseDenovo(DownstreamObj):
             intseq = intseq[None]
         bs, sl = intseq.shape
         length = ((intseq == self.model.decoder.EOS)|(intseq == self.model.decoder.NT)).int().argmax(1)
+        intseq[th.arange(bs), length] = self.model.decoder.EOS
         mask = length > 0
         index_array = th.arange(sl)[None].repeat([sum(mask), 1]).to(intseq.device)
         boolean_array = index_array > length[mask, None]
@@ -325,7 +330,7 @@ class BaseDenovo(DownstreamObj):
             self.on_eval_step_end(target, loss_mask)
         
         steps = i+1
-        totsz = self.config['loader']['batch_size']*steps
+        totsz = self.config['batch_size']*steps
         out['ce'] = float((out['ce'] / (totsz * self.config['sl'])).cpu().detach().numpy())
         for metric in tots['sum'].keys():
             out[metric] = tots['sum'][metric] /  tots['total'][metric]
@@ -442,7 +447,7 @@ class DenovoArDSObj(BaseDenovo):
         return dec_input, target, loss_mask
 
     def LossFunction(self, target, prediction, loss_mask):
-        targ_one_hot = F.one_hot(target, self.predcats).type(th.float32)
+        targ_one_hot = F.one_hot(target, self.model.decoder.predcats).type(th.float32)
         targ_one_hot = targ_one_hot.transpose(-1,-2)
         prediction = prediction.transpose(-1,-2)
         all_loss = F.cross_entropy(prediction, targ_one_hot, reduction='none')
@@ -623,7 +628,7 @@ if __name__ == '__main__':
         for key in [
             'epochs', 'prev_wts', 'load_last', 'lr', 'lr_warmup', 
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
-            'loader', 'log_wandb', 'eval_only',
+            'loader', 'log_wandb', 'eval_only', 'batch_size',
         ]:
             config[key] = config_[key]
     # Create new experiment

@@ -75,7 +75,7 @@ class Decoder(nn.Module):
         self.num_inp_tokens = num_inp_tokens
         # Denovo random: No need for start or hidden tokens
         # Denovo teacher forcing: remove Null, remove <SOS>, add <EOS>
-        self.num_out_tokens = num_inp_tokens - 1 
+        self.num_out_tokens = num_inp_tokens
         self.use_charge = use_charge
         self.use_energy = use_energy
         self.use_mass = use_mass
@@ -297,14 +297,14 @@ class DenovoDecoder(nn.Module):
         #self.inpdict['<h>'] = len(self.inpdict)
         #self.hidden_token = self.inpdict['<h>']
         
-        self.outdict.pop('X')
+        #self.outdict.pop('X')
         self.outdict['<EOS>'] = np.max(list(self.outdict.values())) + 1
         self.EOS = self.outdict['<EOS>']
 
         dec_config['num_inp_tokens'] = np.max(list(self.inpdict.values())) + 1
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
-        self.predcats = np.max(list(self.outdict.values())) + 1
+        self.predcats = len(self.outdict.values())
         self.scale = Scale(self.outdict)
 
         self.dec_config = dec_config
