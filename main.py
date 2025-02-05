@@ -220,10 +220,10 @@ class BaseDenovo(DownstreamObj):
         bs, sl = intseq.shape
         length = ((intseq == self.model.decoder.EOS)|(intseq == self.model.decoder.NT)).int().argmax(1)
         intseq[th.arange(bs), length] = self.model.decoder.EOS
-        mask = length > 0
-        index_array = th.arange(sl)[None].repeat([sum(mask), 1]).to(intseq.device)
-        boolean_array = index_array > length[mask, None]
-        intseq[mask][boolean_array] = self.model.decoder.NT
+        mask = (length > 0)[:,None]
+        index_array = th.arange(sl)[None].repeat([bs, 1]).to(intseq.device)
+        boolean_array = index_array > length[:, None]
+        intseq[mask & boolean_array] = self.model.decoder.NT
 
         return intseq
 
