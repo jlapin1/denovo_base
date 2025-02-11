@@ -427,7 +427,8 @@ class DenovoArDSObj(BaseDenovo):
         if config['prev_wts'] is not None:
             self.load_saved_weights(self.model, "model", config['load_last'])
             self.load_saved_weights(self.opt, "opt", config['load_last'])     
-        
+            U.optimizer_to(self.opt, device)
+
         self.model.to(device)
     
     def inptarg(self, batch):
@@ -521,6 +522,7 @@ class DenovoDiffusionObj(BaseDenovo):
         if config['prev_wts'] is not None:
             self.load_saved_weights(self.model, "model", config['load_last'])
             self.load_saved_weights(self.opt, "opt", config['load_last'])
+            U.optimizer_to(self.opt, device)
         
         self.model.to(device)
 
@@ -629,8 +631,10 @@ if __name__ == '__main__':
             'epochs', 'prev_wts', 'load_last', 'lr', 'lr_warmup', 
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
+            'eval_outpath',
         ]:
             config[key] = config_[key]
+        timestamp = config['prev_wts']
     # Create new experiment
     elif config['save_weights']:
         timestamp = U.timestamp()
@@ -664,7 +668,8 @@ if __name__ == '__main__':
     # Run training and/or evaluation
     if config['eval_only']:
         out, df = D.evaluation(dset='test', max_batches=1e10, save_df=True)
-        df.to_parquet(os.path.join(svdir, "output.parquet"))
+        eval_out_path = config['eval_outpath'] if config['eval_outpath'] is not None else svdir
+        df.to_parquet(os.path.join(eval_out_path, "output.parquet"))
         print("\n", out)
     else:
         print("Test validation", end='')

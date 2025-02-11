@@ -31,6 +31,21 @@ def save_optimizer_state(opt, fn):
 
 def load_optimizer_state(opt, fn, device):
     opt.load_state_dict(th.load(fn, map_location=device))
+    optimizer_to(opt, device)
+
+def optimizer_to(optim, device):
+    for param in optim.state.values():
+        # Not sure there are any global tensors in the state dict
+        if isinstance(param, th.Tensor):
+            param.data = param.data.to(device)
+            if param._grad is not None:
+                param._grad.data = param._grad.data.to(device)
+        elif isinstance(param, dict):
+            for subparam in param.values():
+                if isinstance(subparam, th.Tensor):
+                    subparam.data = subparam.data.to(device)
+                    if subparam._grad is not None:
+                        subparam._grad.data = subparam._grad.data.to(device)
 
 def save_full_model(model, optimizer, svdir, remark=""):
     th.save(

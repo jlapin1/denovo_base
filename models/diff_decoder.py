@@ -60,9 +60,11 @@ class DenovoDiffusionDecoder(nn.Module):
         alphabet=False,
         use_charge=False,
         use_mass=False,
+        
         self_condition=True,
-        clip_denoised=False,
         output_sigma=False,
+        clip_denoised=False,
+        clamp_denoised=False,
         **kwargs
     ):
         super(DenovoDiffusionDecoder, self).__init__()
@@ -97,6 +99,7 @@ class DenovoDiffusionDecoder(nn.Module):
             )
         self.self_condition = self_condition
         self.clip_denoised = clip_denoised
+        self.clamp_denoised = clamp_denoised
         self.embed_dim = embedding_dimension
         
         """Position"""
@@ -146,8 +149,6 @@ class DenovoDiffusionDecoder(nn.Module):
             'd': d, 
             'h': h,
             'dropout': dropout,
-            #'bias': bias,
-            #'gate': gate,
             'alphabet': alphabet,
         }
         ffn_dict = {
@@ -301,10 +302,11 @@ class DenovoDiffusionDecoder(nn.Module):
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
         }
-
+        
         # Create fully noised real data
         device = model_kwargs['kv_feats'].device
         noise = th.randn(*shape, device=device)
+        
         """target = self.append_null_token(batch['intseq'])
         target = self.replace_with_eos_token(target, batch['peplen'])
         loss_mask = self.sequence_mask(target)
@@ -324,7 +326,7 @@ class DenovoDiffusionDecoder(nn.Module):
             self,
             shape,
             noise=noise,
-            #denoised_fn=self.clamp,
+            denoised_fn=self.clamp if self.clamp_denoised else None,
             clip_denoised=self.clip_denoised,
             model_kwargs=model_kwargs,
             save_xcur=save_xcur
@@ -340,6 +342,9 @@ class DenovoDiffusionDecoder(nn.Module):
         input_ids = dist.argmin(-1)
         #input_ids = self.get_logits(x_0).argmax(-1) # bs, 31
         return self.get_embed(input_ids)
+
+    def set_clamp(self, boolean: bool):
+        self.clamp_denoised = boolean
 
 def _calc_mass_error(
     calc_mz: float, obs_mz: float, charge: int, isotope: int = 0
