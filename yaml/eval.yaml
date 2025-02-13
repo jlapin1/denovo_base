@@ -1,0 +1,8 @@
+# Number of batches in loader is set in config.yaml:loader
+eval_only:
+  set: test
+  max_batches:
+  save: True
+  outpath:
+eval_train: 
+  set: val

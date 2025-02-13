@@ -21,6 +21,7 @@ def create_experiment(directory, svwts=False):
     os.system("cp ./yaml/*.yaml %s/yaml/"%directory)
     if svwts: 
         os.mkdir('%s/weights'%directory)
+        os.mkdir(f'{directory}/weights/save')
 
 def message_board(line, path):
     with open(path, 'a') as F:

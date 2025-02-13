@@ -1,19 +1,18 @@
 eval_only: True
-eval_outpath: ./
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 56
+epochs: 30
 
 # Learning rate
-lr: 0.0002
-lr_warmup: False
+lr: 0.0001
+lr_warmup: True
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 2.0e-4
+lr_warmup_end: 1.0e-4
 lr_warmup_steps: 20000
 
 # Loading previous weights
-prev_wts: /cmnfs/proj/denovo/experiments/2025-01-30_19-11-43 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 
 # Logging and saving weights
@@ -48,7 +47,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name:  ar # *diff* | *
+decoder_name:  diff # *diff* | *
 
 # Encoder model
 

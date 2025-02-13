@@ -82,7 +82,6 @@ class Seq2SeqDiff(Seq2Seq):
         self.decoder = DenovoDiffusionDecoder(
             input_output_units = diff_config['in_channel'],
             clip_denoised      = diff_config['clip_denoised'],
-            clamp_denoised     = diff_config['clamp_denoised'],
             output_sigma       = diff_config['learn_sigma'],
             token_dict         = token_dict,
             dec_config         = decoder_config,

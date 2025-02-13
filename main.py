@@ -13,6 +13,7 @@ from models.heads import SequenceHead, ClassifierHead
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 import os
+import shutil
 from tqdm import tqdm
 from collections import deque
 from time import time
@@ -60,7 +61,7 @@ class DownstreamObj:
     def save_weights(self, fp='./model.wts'):
         th.save(self.model.state_dict(), fp)
     
-    def load_saved_weights(self, obj, weights_type='model', load_last=False):
+    def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
         print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
         possible_weights_path = glob(os.path.join(self.svdir, "weights", regex))
@@ -83,7 +84,13 @@ class DownstreamObj:
                     qualifier = '"last"'
             
             print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
-            obj.load_state_dict(th.load(weights_path, map_location=device))    
+            obj.load_state_dict(th.load(weights_path, map_location=device))
+
+            if retain:
+                try:
+                    shutil.copyfile(weights_path, os.path.join(self.svdir, "weights", "save"))
+                except:
+                    pass
         
         # Found nothing
         else:
@@ -425,7 +432,8 @@ class DenovoArDSObj(BaseDenovo):
         
         # loading previous weights
         if config['prev_wts'] is not None:
-            self.load_saved_weights(self.model, "model", config['load_last'])
+            retain = False if config['load_last'] else True
+            self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
             self.load_saved_weights(self.opt, "opt", config['load_last'])     
             U.optimizer_to(self.opt, device)
 
@@ -520,7 +528,8 @@ class DenovoDiffusionObj(BaseDenovo):
 
         # loading previous weights
         if config['prev_wts'] is not None:
-            self.load_saved_weights(self.model, "model", config['load_last'])
+            retain = False if config['load_last'] else True
+            self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
             self.load_saved_weights(self.opt, "opt", config['load_last'])
             U.optimizer_to(self.opt, device)
         
@@ -611,11 +620,14 @@ class DenovoDiffusionObj(BaseDenovo):
 
 if __name__ == '__main__':
 
-    # Read yaml
+    # Read yamls
     with open("./yaml/config.yaml") as stream:
         config = yaml.safe_load(stream)
     # Overrides over a loaded previous experiment
     config_ = config.copy()
+    # Eval config will not be overwritten
+    with open("./yaml/eval.yaml") as stream:
+        evconfig = yaml.safe_load(stream)
 
     ########################################################
     # Create experiment directory in save/downstream_only/ #
@@ -631,7 +643,6 @@ if __name__ == '__main__':
             'epochs', 'prev_wts', 'load_last', 'lr', 'lr_warmup', 
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
-            'eval_outpath',
         ]:
             config[key] = config_[key]
         timestamp = config['prev_wts']
@@ -667,9 +678,12 @@ if __name__ == '__main__':
 
     # Run training and/or evaluation
     if config['eval_only']:
-        out, df = D.evaluation(dset='test', max_batches=1e10, save_df=True)
-        eval_out_path = config['eval_outpath'] if config['eval_outpath'] is not None else svdir
-        df.to_parquet(os.path.join(eval_out_path, "output.parquet"))
+        evc = evconfig['eval_only']
+        max_batches = evc['max_batches'] if evc['max_batches'] is not None else config['loader']['val_steps']
+        out, df = D.evaluation(dset=evc['set'], max_batches=max_batches, save_df=True)
+        eval_out_path = evc['outpath'] if evc['outpath'] is not None else svdir
+        if evc['save']:
+            df.to_parquet(os.path.join(evc['outpath'], "output.parquet"))
         print("\n", out)
     else:
         print("Test validation", end='')
