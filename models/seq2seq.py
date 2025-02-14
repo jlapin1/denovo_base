@@ -4,7 +4,7 @@ from models.encoder import Encoder
 from models.depthcharge.SpectrumTransformerEncoder import dc_encoder
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
-from models.diffusion.model_utils import create_model_and_diffusion
+from models.diffusion.model_utils import create_diffusion
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
 
@@ -78,7 +78,7 @@ class Seq2SeqDiff(Seq2Seq):
             top_peaks=top_peaks,
         )
         decoder_config['kv_indim'] = self.encoder.run_units
-        _, self.diff_obj = create_model_and_diffusion(**diff_config)
+        self.diff_obj = create_diffusion(**diff_config)
         self.decoder = DenovoDiffusionDecoder(
             input_output_units = diff_config['in_channel'],
             clip_denoised      = diff_config['clip_denoised'],

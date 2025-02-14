@@ -1,8 +1,8 @@
-eval_only: True
+eval_only: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 30
+epochs: 80
 
 # Learning rate
 lr: 0.0001
@@ -110,7 +110,7 @@ decoder_diff:
     noise_schedule: mine
     timestep_respacing: ""
     use_kl: False
-    predict_xstart: True
+    predict_xstart: False # epsilon if False
     clip_denoised: False
     rescale_timesteps: True
     rescale_learned_sigmas: True

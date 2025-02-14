@@ -2,7 +2,8 @@
 eval_only:
   set: test
   max_batches:
-  save: True
+  save: False
   outpath:
+  clamp_denoised: # None -> use existing setting in loaded yaml
 eval_train: 
   set: val

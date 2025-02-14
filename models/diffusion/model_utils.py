@@ -1,16 +1,11 @@
 import models.diffusion.gaussian_diffusion as gd
 from models.diffusion.respace import SpacedDiffusion, space_timesteps
-#from src.modeling.predictor.transformer_model import TransformerNetModel_encoder_decoder
 
-
-def create_model_and_diffusion(
+def create_diffusion(
     #class_cond,
     learn_sigma,
     sigma_small,
     sigma_weight,
-    #num_channels,
-    #num_heads,
-    #dropout,
     diffusion_steps,
     noise_schedule,
     timestep_respacing,
@@ -18,18 +13,8 @@ def create_model_and_diffusion(
     predict_xstart,
     rescale_timesteps,
     rescale_learned_sigmas,
-    #use_checkpoint,
     model_arch,
-    #in_channel,
-    #out_channel,
     training_mode,
-    #vocab_size,
-    #config_name,
-    #logits_mode,
-    #init_pretrained,
-    #freeze_embeddings,
-    #use_pretrained_embeddings,
-    #load_ckpt,
     sequence_len,
     resume_checkpoint,
     pad_tok_id,
@@ -37,26 +22,6 @@ def create_model_and_diffusion(
     schedule_update_stride,
     **kwargs,
 ):
-    model = None
-    """
-    model = create_model(
-        num_channels,
-        learn_sigma=learn_sigma,
-        class_cond=class_cond,
-        use_checkpoint=use_checkpoint,
-        num_heads=num_heads,
-        dropout=dropout,
-        in_channel=in_channel,
-        out_channel=out_channel,
-        training_mode=training_mode,
-        vocab_size=vocab_size,
-        config_name=config_name,
-        logits_mode=logits_mode,
-        init_pretrained=init_pretrained,
-        freeze_embeddings=freeze_embeddings,
-        use_pretrained_embeddings=use_pretrained_embeddings,
-        load_ckpt=load_ckpt,
-    )"""
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
         learn_sigma=learn_sigma,
@@ -76,49 +41,7 @@ def create_model_and_diffusion(
         loss_update_granu=loss_update_granu,
         schedule_update_stride=schedule_update_stride,
     )
-    return model, diffusion
-
-
-def create_model(
-    num_channels,
-    learn_sigma,
-    use_checkpoint,
-    class_cond,  # TODO for the next version
-    num_heads,
-    dropout,
-    init_pretrained,
-    freeze_embeddings,
-    use_pretrained_embeddings,
-    in_channel,
-    out_channel,
-    training_mode,
-    vocab_size,
-    config_name,
-    logits_mode,
-    load_ckpt,
-    encoder_layers = 6,
-    decoder_layers = 6,
-    model_type = 'encoder_decoder',
-):
-    return TransformerNetModel_encoder_decoder(
-            in_channels=in_channel,
-            model_channels=num_channels,
-            out_channels=(out_channel if not learn_sigma else out_channel * 2),
-            dropout=dropout,
-            use_checkpoint=use_checkpoint,
-            num_heads=num_heads,
-            config_name=config_name,
-            vocab_size=vocab_size,
-            logits_mode=logits_mode,
-            init_pretrained=init_pretrained,
-            use_pretrained_embeddings=use_pretrained_embeddings,
-            freeze_embeddings=freeze_embeddings,
-            encoder_layers = encoder_layers,
-            decoder_layers = decoder_layers,
-            load_ckpt=load_ckpt,
-        )
-
-
+    return diffusion
 
 def create_gaussian_diffusion(
     *,
