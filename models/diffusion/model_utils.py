@@ -8,6 +8,7 @@ def create_diffusion(
     sigma_weight,
     diffusion_steps,
     noise_schedule,
+    noise_exponent,
     timestep_respacing,
     use_kl,
     predict_xstart,
@@ -28,6 +29,7 @@ def create_diffusion(
         sigma_small=sigma_small,
         vlb_weight=sigma_weight,
         noise_schedule=noise_schedule,
+        noise_exponent=noise_exponent,
         use_kl=use_kl,
         predict_xstart=predict_xstart,
         rescale_timesteps=rescale_timesteps,
@@ -50,6 +52,7 @@ def create_gaussian_diffusion(
     sigma_small=False,
     vlb_weight=0.001,
     noise_schedule="linear",
+    noise_exponent=0.2,
     use_kl=False,
     predict_xstart=False,
     rescale_timesteps=False,
@@ -64,7 +67,7 @@ def create_gaussian_diffusion(
     schedule_update_stride=0,
 ):
 
-    betas = gd.get_named_beta_schedule(noise_schedule, steps)
+    betas = gd.get_named_beta_schedule(noise_schedule, steps, exponent=noise_exponent)
 
     if use_kl:
         loss_type = gd.LossType.E2E_KL
@@ -88,9 +91,12 @@ def create_gaussian_diffusion(
 
     model_mean_type = None
     if not predict_xstart:
+        cmt = "epsilon"
         model_mean_type = gd.ModelMeanType.EPSILON  # predicts noise
     else:  # predicts starting x (x0 estimate, possibly used by DDIM?)
+        cmt = "x_start"
         model_mean_type = gd.ModelMeanType.START_X
+    print(f"<DIFFCOMMENT> Model mean prediction is {cmt}")
 
     return SpacedDiffusion(
         use_timesteps=space_timesteps(steps, timestep_respacing),

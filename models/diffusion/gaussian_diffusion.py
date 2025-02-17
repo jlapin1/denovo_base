@@ -27,19 +27,20 @@ import os
 
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
-def my_schedule(num_diffusion_steps):
+def my_schedule(num_diffusion_steps, exponent=0.2):
+    print(f"<DIFFCOMMENT> Noise schedule with exponent={exponent}")
     frac = num_diffusion_steps**-1
     epsilon = 0.5*frac
     betas = betas_for_alpha_bar(
         num_diffusion_steps,
-        lambda t: 1 - (t + epsilon)**0.2,
+        lambda t: 1 - (t + epsilon)**exponent, # 0.2
     )
     # smooth edge
     betas[0] = betas[0] / 2
     betas[-2] = (betas[-3]+betas[-1]) / 2
     return betas
 
-def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, **kwargs):
     """
     Get a pre-defined beta schedule for the given name.
 
@@ -86,7 +87,7 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
         )
         return np.concatenate([first_part, second_part])
     elif schedule_name == 'mine':
-        return my_schedule(num_diffusion_timesteps)
+        return my_schedule(num_diffusion_timesteps, kwargs['exponent'])
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
 

@@ -32,7 +32,7 @@ loader:
   dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
   buffer_size: 10000
   num_workers: 9
-  val_steps: 100
+  val_steps: 50
   remove_columns:
     - 'evidence_index'
     - 'scan_number'
@@ -108,9 +108,10 @@ decoder_diff:
     class_cond: False
     diffusion_steps: 200
     noise_schedule: mine
+    noise_exponent: 0.5
     timestep_respacing: ""
     use_kl: False
-    predict_xstart: False # epsilon if False
+    predict_xstart: True # epsilon if False
     clip_denoised: False
     rescale_timesteps: True
     rescale_learned_sigmas: True
