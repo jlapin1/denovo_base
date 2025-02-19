@@ -2,8 +2,10 @@
 eval_only:
   set: test
   max_batches:
-  save: False
-  outpath:
+  save: True
+  outpath: ./output5.parquet
+  # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
+  n: 5 # None -> use existing
 eval_train: 
   set: val

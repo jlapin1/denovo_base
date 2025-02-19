@@ -245,7 +245,7 @@ class BaseDenovo(DownstreamObj):
             for m in intseq
         ]
 
-    def evaluation(self, dset='val', max_batches=1e10, save_df=False):
+    def evaluation(self, dset='val', max_batches=1e10, save_df=False, kwargs={}):
         
         # Dataframe
         if save_df:
@@ -280,10 +280,10 @@ class BaseDenovo(DownstreamObj):
                 break
 
             #print("\rEvaluation step %d"%(i+1), end='')
-            batch = U.Dict2dev(batch, device)
+            batchdev = U.Dict2dev(batch, device)
             with th.no_grad():
-                seqint, target, loss_mask = self.inptarg(batch)
-                prediction, probs = self.model.predict_sequence(batch)
+                seqint, target, loss_mask = self.inptarg(batchdev)
+                prediction, probs = self.model.predict_sequence(batchdev, **kwargs)
             
             # Do some resizing/reshaping
             prediction = prediction[..., :target.shape[1]] # loaded shapes can change based on batch
@@ -361,7 +361,7 @@ class BaseDenovo(DownstreamObj):
             self.on_train_epoch_end()
             
             # Eval
-            out = self.evaluation(dset=eval_dset, max_batches=self.val_steps)
+            out = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
             
             # Logging
             if self.config['log_wandb']:
@@ -416,6 +416,7 @@ class DenovoArDSObj(BaseDenovo):
             svdir=svdir
         )
         self.training_loss_keys = ['loss']
+        self.eval_kwargs = {}
         
         from models.seq2seq import Seq2SeqAR
         
@@ -502,6 +503,7 @@ class DenovoDiffusionObj(BaseDenovo):
             svdir=svdir
         )
         self.training_loss_keys = ['loss', 'mse', 'decoder_nll', 'tT']
+        self.eval_kwargs = {'n': 1}
 
         # Diffusion object
         if config['decoder_diff']['diffusion_config']['learn_sigma']: 
@@ -515,17 +517,19 @@ class DenovoDiffusionObj(BaseDenovo):
 
         # diffusion object created inside Seq2Seq
         self.model = Seq2SeqDiff(
-            encoder_config = config['encoder_dict'], 
-            decoder_config = config['decoder_diff']['model_config'], 
-            diff_config    = config['decoder_diff']['diffusion_config'],
+            encoder_config  = config['encoder_dict'], 
+            decoder_config  = config['decoder_diff']['model_config'], 
+            diff_config     = config['decoder_diff']['diffusion_config'],
+            ensemble_config = config['decoder_diff']['ensemble'], 
             top_peaks = config['top_peaks'], 
             max_peptide_length = config['pep_length'][1], 
             token_dict = self.data.amod_dic,
+            masses_path = config['loader']['masses_path'],
         )
-
+        
         print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
-
+        
         # loading previous weights
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
@@ -534,7 +538,7 @@ class DenovoDiffusionObj(BaseDenovo):
             U.optimizer_to(self.opt, device)
         
         self.model.to(device)
-
+        
     def inptarg(self, batch):
         
         bs, sl = batch['intseq'].shape
@@ -643,6 +647,7 @@ if __name__ == '__main__':
             'epochs', 'prev_wts', 'load_last', 'lr', 'lr_warmup', 
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
+            'top_peaks',
         ]:
             config[key] = config_[key]
         timestamp = config['prev_wts']
@@ -681,21 +686,24 @@ if __name__ == '__main__':
         evc = evconfig['eval_only']
         
         # Apply settings that are independent of training
-        max_batches = int(eval(str(evc['max_batches'] if evc['max_batches'] is not None else config['loader']['val_steps'])))
-        if evc['clamp_denoised'] is not None:
-            D.model.decoder.clamp_denoised = evc['clamp_denoised']
+        max_batches = int(eval(str(evc['max_batches'] if evc['max_batches'] is not None else 9e10)))
+        if 'diff' in config['decoder_name']:
+            if evc['clamp_denoised'] is not None:
+                D.model.decoder.clamp_denoised = evc['clamp_denoised']
+            if evc['n'] is not None:
+                D.model.ens_size = evc['n']
 
         # Run evaluation
         out, df = D.evaluation(dset=evc['set'], max_batches=max_batches, save_df=True)
         
         # Saving results
-        eval_out_path = evc['outpath'] if evc['outpath'] is not None else svdir
         if evc['save']:
-            df.to_parquet(os.path.join(evc['outpath'], "output.parquet"))
+            eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
+            df.to_parquet(eval_out_path)
         print("\n", out)
     else:
         print("Test validation", end='')
-        #out = D.evaluation(dset='val', max_batches=2)
-        #assert D.config['high_score'] in out.keys()
+        out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])
