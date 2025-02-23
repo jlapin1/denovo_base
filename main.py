@@ -28,12 +28,11 @@ F = nn.functional
 choice = np.random.choice
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
-class DownstreamObj:
-    def __init__(self, config, task='denovo_ar', base_model=None, svdir='./downstream/'):
+class BaseDenovo:
+    def __init__(self, config, svdir='./downstream/'):
         
         # Config is entire downstream yaml
         self.config = config
-        self.task = task
         
         # Create directory for saving results; only use if run from PretrainModel.py
         self.log = config['save_weights']
@@ -45,18 +44,40 @@ class DownstreamObj:
                 os.mkdir(os.path.join(svdir, 'weights'))
         self.svdir = svdir
         self.config['sl'] = self.config['pep_length'][1]
-       
-        if config['lr_warmup']:
+        
+        self.phase_counter = [0, 0, 0]
+        if config['lr_schedule']:
+            # Phase 1 warmup
             self.lr_warmup_increment = (
                 (config['lr_warmup_end']-config['lr_warmup_start']) / 
                 config['lr_warmup_steps']
             )
             self.starting_lr = config['lr_warmup_start']
+            # Phase 3 decay
+            self.lr_alpha = np.exp(np.log(config['lr_floor'] / config['lr_warmup_end']) / eval(config['lr_decay_steps']))
+            self.lr_phase = 0
         else:
-            self.starting_lr = config['lr']
+            self.starting_lr = config['lr_warmup_end']
+            self.lr_phase = 1
+            self.config['lr_flat_steps'] = 9e9
         
         self.running_loss = []
-        self.global_step = 0 
+        self.global_step = 0
+
+        # Dataloader
+        if 'val_steps' in self.config['loader'].keys(): # backwards compatibility
+            val_steps = self.config['loader']['val_steps']
+            self.val_steps = 1 if val_steps == None else val_steps # backwards compatiblity
+        else:
+            self.val_steps = 100
+        self.data = LoaderHF(
+            top_pks=config['top_peaks'], 
+            pep_length=config['pep_length'],
+            batch_size=config['batch_size'],
+            **self.config['loader']
+        )
+
+        self.eval_stats = []
 
     def save_weights(self, fp='./model.wts'):
         th.save(self.model.state_dict(), fp)
@@ -177,31 +198,28 @@ class DownstreamObj:
                 train_loss = np.append(np.loadtxt(os.path.join(self.svdir, "train_loss.txt")), train_loss)
             np.savetxt(os.path.join(self.svdir, "train_loss.txt"), train_loss, fmt="%.6f", header=self.header)
 
-class BaseDenovo(DownstreamObj):
-    def __init__(self, 
-                 config, 
-                 task='denovo', 
-                 base_model=None, 
-                 ar=False, 
-                 svdir='./downstream/'
-                 ):
-        super().__init__(config=config, task=task, base_model=base_model, svdir=svdir)
-        self.ar = ar
- 
-        # Dataloader
-        if 'val_steps' in self.config['loader'].keys(): # backwards compatibility
-            val_steps = self.config['loader']['val_steps']
-            self.val_steps = 1 if val_steps == None else val_steps # backwards compatiblity
+    def update_lr(self):
+        # Warmup phase
+        if self.lr_phase == 0:
+            if self.phase_counter[0] < self.config['lr_warmup_steps']:
+                self.opt.param_groups[-1]['lr'] += self.lr_warmup_increment
+                self.phase_counter[0] += 1
+            else:
+                self.lr_phase = 1
+        # Flat phase
+        elif self.lr_phase == 1:
+            if self.phase_counter[1] < self.config['lr_flat_steps']:
+                self.phase_counter[1] += 1
+            else:
+                self.lr_phase = 2
+        # Decay phase
         else:
-            self.val_steps = 100
-        self.data = LoaderHF(
-            top_pks=config['top_peaks'], 
-            pep_length=config['pep_length'],
-            batch_size=config['batch_size'],
-            **self.config['loader']
-        )
-
-        self.eval_stats = []
+            if self.opt.param_groups[-1]['lr'] > self.config['lr_floor']:
+                lr = self.config['lr_warmup_end']*self.lr_alpha**self.phase_counter[2]
+                self.opt.param_groups[-1]['lr'] = lr
+                self.phase_counter[2] += 1
+            else:
+                self.opt.param_groups[-1]['lr'] = self.config['lr_floor']
 
     def replace_with_eos_token(self, intseq, lengths):
         if len(intseq.shape) == 1:
@@ -409,10 +427,9 @@ class BaseDenovo(DownstreamObj):
 
 
 class DenovoArDSObj(BaseDenovo):
-    def __init__(self, config, base_model=None, svdir='./dswts/'):
-        task = 'denovo_ar'
+    def __init__(self, config, svdir='./dswts/'):
         super().__init__(
-            config=config, task=task, base_model=base_model, ar=True, 
+            config=config,
             svdir=svdir
         )
         self.training_loss_keys = ['loss']
@@ -480,10 +497,7 @@ class DenovoArDSObj(BaseDenovo):
         
         loss.backward()
         
-        if self.config['lr_warmup']:
-            if self.global_step < self.config['lr_warmup_steps']:
-                self.opt.param_groups[-1]['lr'] += self.lr_warmup_increment
-
+        self.update_lr()
         self.opt.step()
         
         return {'loss': loss}
@@ -496,10 +510,9 @@ class DenovoArDSObj(BaseDenovo):
         })
 
 class DenovoDiffusionObj(BaseDenovo):
-    def __init__(self, config, diff_config=None, base_model=None, svdir='./dswts/'):
-        task = 'denovo_diff'
+    def __init__(self, config, diff_config=None, svdir='./dswts/'):
         super().__init__(
-            config=config, task=task, base_model=base_model, ar=False, 
+            config=config, 
             svdir=svdir
         )
         self.training_loss_keys = ['loss', 'mse', 'decoder_nll', 'tT']
@@ -589,10 +602,7 @@ class DenovoDiffusionObj(BaseDenovo):
         loss = losses['loss']
         loss.backward()
         
-        if self.config['lr_warmup']:
-            if self.global_step < self.config['lr_warmup_steps']:
-                self.opt.param_groups[-1]['lr'] += self.lr_warmup_increment
-
+        self.update_lr()
         self.opt.step()
         
         return losses

@@ -2,23 +2,28 @@ eval_only: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 80
+epochs: 100
 
 # Learning rate
-lr: 0.0001
-lr_warmup: True
+lr_schedule: True
+# Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 1.0e-4
+lr_warmup_end: 2.0e-4 # phase 2 LR
 lr_warmup_steps: 20000
+# Phase 2 - Flat
+lr_flat_steps: 0
+# Phase 3 - Decay
+lr_floor: 5.0e-5
+lr_decay_steps: 14100*90
 
 # Loading previous weights
 prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -47,7 +52,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name:  diff # *diff* | *
+decoder_name: ar # *diff* | *
 
 # Encoder model
 
@@ -106,9 +111,9 @@ decoder_diff:
     sigma_small: False
     sigma_weight: 1.0 # vlb_weight
     class_cond: False
-    diffusion_steps: 400
+    diffusion_steps: 200
     noise_schedule: mine
-    noise_exponent: 0.3
+    noise_exponent: 0.2
     timestep_respacing: ""
     use_kl: False
     predict_xstart: True # epsilon if False
