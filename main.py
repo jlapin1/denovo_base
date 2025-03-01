@@ -53,8 +53,15 @@ class BaseDenovo:
                 config['lr_warmup_steps']
             )
             self.starting_lr = config['lr_warmup_start']
+            # Phase 2 flat
+            self.lr_flat_steps = (
+                eval(config['lr_flat_steps']) if type(config['lr_flat_steps']) == str else config['lr_flat_steps']
+            )
             # Phase 3 decay
-            self.lr_alpha = np.exp(np.log(config['lr_floor'] / config['lr_warmup_end']) / eval(config['lr_decay_steps']))
+            lr_decay_steps = (
+                eval(config['lr_decay_steps']) if type(config['lr_decay_steps']) == str else config['lr_decay_steps']
+            )
+            self.lr_alpha = np.exp(np.log(config['lr_floor'] / config['lr_warmup_end']) / lr_decay_steps)
             self.lr_phase = 0
         else:
             self.starting_lr = config['lr_warmup_end']
@@ -208,7 +215,7 @@ class BaseDenovo:
                 self.lr_phase = 1
         # Flat phase
         elif self.lr_phase == 1:
-            if self.phase_counter[1] < self.config['lr_flat_steps']:
+            if self.phase_counter[1] < self.lr_flat_steps:
                 self.phase_counter[1] += 1
             else:
                 self.lr_phase = 2
@@ -328,7 +335,7 @@ class BaseDenovo:
                 'total': {
                     'aa_recall': n_aa2,
                     'aa_precision': n_aa1,
-                    'peptide': len(pred_strings),
+                    'peptide': len(aa_matches_batch),
                 },
             }
 
@@ -474,14 +481,14 @@ class DenovoArDSObj(BaseDenovo):
         return dec_input, target, loss_mask
 
     def LossFunction(self, target, prediction, loss_mask):
-        targ_one_hot = F.one_hot(target, self.model.decoder.predcats).type(th.float32)
-        targ_one_hot = targ_one_hot.transpose(-1,-2)
+        #targ_one_hot = F.one_hot(target, self.model.decoder.predcats).type(th.float32)
+        #targ_one_hot = targ_one_hot.transpose(-1,-2)
         prediction = prediction.transpose(-1,-2)
-        all_loss = F.cross_entropy(prediction, targ_one_hot, reduction='none')
-        masked_loss = all_loss[loss_mask]
-        loss = masked_loss.sum() / loss_mask.sum()
+        all_loss = F.cross_entropy(prediction, target, reduction='none')
+        masked_loss = all_loss * loss_mask.float()
+        loss = masked_loss.sum(dim=1) / loss_mask.sum(dim=1)
 
-        return loss
+        return loss.mean()
 
     def train_step(self, batch, trenc=True):
         batch = U.Dict2dev(batch, device)
