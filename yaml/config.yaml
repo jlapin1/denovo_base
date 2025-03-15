@@ -20,10 +20,10 @@ lr_decay_steps: 14100*90
 prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -52,7 +52,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *
+decoder_name: diff # *diff* | *
 
 # Encoder model
 
@@ -140,16 +140,16 @@ decoder_diff:
     d: 64
     h: 8
     ffn_multiplier: 2
-    ce_units: 256
+    timestep_dimension: 128
+    precursor_dimension: 128
     use_charge: True
-    use_energy: False
     use_mass: True
+    use_energy: False
     prec_type: None
     norm_type: 'layer'
     prenorm: True
     preembed: True
     penultimate_units:
-    pool: False
     dropout: 0
     alphabet: False
     self_condition: True

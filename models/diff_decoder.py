@@ -56,7 +56,8 @@ class DenovoDiffusionDecoder(nn.Module):
         dropout=0,
         unit_multiplier=4,
         depth=6,
-        embedding_dimension=128,
+        timestep_dimension=128,
+        precursor_dimension=128,
         alphabet=False,
         use_charge=False,
         use_mass=False,
@@ -100,7 +101,8 @@ class DenovoDiffusionDecoder(nn.Module):
         self.self_condition = self_condition
         self.clip_denoised = clip_denoised
         self.clamp_denoised = clamp_denoised
-        self.embed_dim = embedding_dimension
+        self.time_dimension = timestep_dimension
+        self.precursor_dimension = precursor_dimension
         
         """Position"""
         pos = mp.FourierFeatures(
@@ -119,14 +121,14 @@ class DenovoDiffusionDecoder(nn.Module):
             if use_charge:
                 #charge_embedder = nn.Embedding(8, embedding_dimension)
                 self.charge_features = lambda charge: (
-                    mp.FourierFeatures(charge, 1, 10, embedding_dimension)
+                    mp.FourierFeatures(charge, 1, 10, precursor_dimension)
                 )
             if use_mass:
                 self.mass_features = lambda mass: (
-                    mp.FourierFeatures(mass, 0.001, 10000, embedding_dimension)
+                    mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
-            self.ce_emb = nn.Sequential(
-                nn.Linear(embedding_dimension*num, self.RU)
+            self.precursor_emb = nn.Sequential(
+                nn.Linear(precursor_dimension*num, self.RU)
             )
         else:
             self.added_tokens = 0
@@ -164,7 +166,7 @@ class DenovoDiffusionDecoder(nn.Module):
                 norm_type='layer', 
                 prenorm=False, 
                 embed_type='preembed',
-                embed_indim=embedding_dimension,
+                embed_indim=timestep_dimension,
                 is_cross=True,
                 kvindim=dec_config['kv_indim']
             ) 
@@ -190,9 +192,9 @@ class DenovoDiffusionDecoder(nn.Module):
 
         """Timestep embedding"""
         self.time_embed = nn.Sequential(
-            nn.Linear(embedding_dimension, embedding_dimension),
+            nn.Linear(timestep_dimension, timestep_dimension),
             nn.SiLU(),
-            nn.Linear(embedding_dimension, embedding_dimension)
+            nn.Linear(timestep_dimension, timestep_dimension)
         )
 
     def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None):
@@ -210,7 +212,7 @@ class DenovoDiffusionDecoder(nn.Module):
                 ce_emb.append(self.mass_features(mass))
             if len(ce_emb) > 1:
                 ce_emb = th.cat(ce_emb, dim=-1)
-            ce_emb = self.ce_emb(ce_emb)
+            ce_emb = self.precursor_emb(ce_emb)
             
             out = th.cat([ce_emb[:,None], out], dim=1)
         
@@ -274,7 +276,7 @@ class DenovoDiffusionDecoder(nn.Module):
                 self_conditions=None,
                 **kwargs
     ):
-        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 1, 10000, self.embed_dim))
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 1, 10000, self.time_dimension))
         if self_conditions is not None:
             x = self.concat_self_cond(x, self_conditions)
         emb = self.input_proj_dec(x)
