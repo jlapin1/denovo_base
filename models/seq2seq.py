@@ -1,7 +1,6 @@
 import torch as th
 from torch import nn
 from models.encoder import Encoder
-from models.depthcharge.SpectrumTransformerEncoder import dc_encoder
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
@@ -20,9 +19,6 @@ class Seq2Seq(nn.Module):
         super(Seq2Seq, self).__init__()
         self.encoder_dict = encoder_config
 
-        #if ['encoder_name'] == 'depthcharge':
-        #    self.encoder = dc_encoder(sequence_length=top_peaks)
-        #else:
         self.encoder = Encoder(
             sequence_length=top_peaks,
             device=device,
