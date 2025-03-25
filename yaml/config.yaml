@@ -20,10 +20,10 @@ lr_decay_steps: 14100*90
 prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
