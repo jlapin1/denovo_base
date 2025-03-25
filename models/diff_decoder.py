@@ -61,7 +61,7 @@ class DenovoDiffusionDecoder(nn.Module):
         alphabet=False,
         use_charge=False,
         use_mass=False,
-        prenorm=True,
+        prenorm=False,
         self_condition=True,
         output_sigma=False,
         clip_denoised=False,
