@@ -61,7 +61,7 @@ class DenovoDiffusionDecoder(nn.Module):
         alphabet=False,
         use_charge=False,
         use_mass=False,
-        
+        prenorm=False,
         self_condition=True,
         output_sigma=False,
         clip_denoised=False,
@@ -164,7 +164,7 @@ class DenovoDiffusionDecoder(nn.Module):
                 attention_dict, 
                 ffn_dict, 
                 norm_type='layer', 
-                prenorm=False, 
+                prenorm=prenorm, 
                 embed_type='preembed',
                 embed_indim=timestep_dimension,
                 is_cross=True,

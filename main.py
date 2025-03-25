@@ -64,9 +64,9 @@ class BaseDenovo:
             self.lr_alpha = np.exp(np.log(config['lr_floor'] / config['lr_warmup_end']) / lr_decay_steps)
             self.lr_phase = 0
         else:
-            self.starting_lr = config['lr_warmup_end']
+            self.starting_lr = eval(config['lr_warmup_end']) if type(config['lr_warmup_end']) == str else config['lr_warmup_end']
             self.lr_phase = 1
-            self.config['lr_flat_steps'] = 9e9
+            self.lr_flat_steps = 9e9
         
         self.running_loss = []
         self.global_step = 0
@@ -662,7 +662,7 @@ if __name__ == '__main__':
             config = yaml.safe_load(stream)
         # Replace previous settings with new ones
         for key in [
-            'epochs', 'prev_wts', 'load_last', 'lr', 'lr_warmup', 
+            'epochs', 'prev_wts', 'load_last', 'lr_schedule',
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
             'top_peaks',
