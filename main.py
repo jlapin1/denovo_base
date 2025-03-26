@@ -8,7 +8,6 @@ import path
 from loader import LoaderHF
 import numpy as np
 from models.encoder import Encoder
-from models.depthcharge.SpectrumTransformerEncoder import dc_encoder
 from models.heads import SequenceHead, ClassifierHead
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
