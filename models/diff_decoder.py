@@ -184,7 +184,7 @@ class DenovoDiffusionDecoder(nn.Module):
         )
         self.seq_emb.weight = I.normal_(self.seq_emb.weight, 0, 0.03)
         with th.no_grad(): 
-            self.seq_emb.weight[22] = th.zeros_like(self.seq_emb.weight[22])
+            self.seq_emb.weight[self.NT] = th.zeros_like(self.seq_emb.weight[self.NT])
         # lm_head: backward
         self.lm_head = nn.Linear(input_output_units, len(self.outdict))
         with th.no_grad():
