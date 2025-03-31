@@ -5,12 +5,14 @@ from models.diffusion.gaussian_diffusion import _extract_into_tensor
 from models.diffusion.model_utils import create_diffusion
 import os
 from glob import glob
+import yaml
 
 device = th.device("cuda" if th.cuda.is_available() else 'cpu')
 
 class Classifier(nn.Module):
     def __init__(
         self,
+        diff_dir,
         num_input_tokens=24,
         num_output_classes=8,
         running_units=512,
@@ -29,10 +31,10 @@ class Classifier(nn.Module):
         self.timestep_dimension = timestep_dimension
         self.NT = null_token
         self.EOS = eos_token
-        self.dir = "/cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27"
+        self.dir = diff_dir
         
         """Diffusion object"""
-        create_diffusion(**diff_config)
+        self.configure_diffusion_object(diff_dir)
 
         """Timestep embedding"""
         self.time_embed = nn.Sequential(
@@ -92,23 +94,25 @@ class Classifier(nn.Module):
         self.seq_emb = nn.Embedding(num_input_tokens, running_units, padding_idx=self.NT)
         
         # Locate the saved weight
-        weights_path = glob(os.path.join(self.dir, "weights/*high*wts"))
+        weights_path = glob(os.path.join(self.dir, "weights/*high*wts"))[0]
         weight_dict = th.load(weights_path, map_location=device,)
         seq_emb_weight = weight_dict['decoder.seq_emb.weight']
         
         # Assign the weight
-        assert self.seq_emb.weight.shape == seq_emb_weight.shape
+        assert self.seq_emb.weight.shape == seq_emb_weight.shape, seq_emb_weight.shape
         with th.no_grad():
-            self.seq_emb.weight = seq_emb_weight
+            self.seq_emb.weight = nn.Parameter(seq_emb_weight)
         
         # Don't train the seq_emb
         self.seq_emb.weight.requires_grad = False
 
-    def configure_diffusion_object(self):
-        yaml_file = os.path.join(self.dir, "yaml", "config.yaml")
+    def configure_diffusion_object(self, diff_dir):
+        yaml_file = os.path.join(diff_dir, "yaml", "config.yaml")
         with open(yaml_file) as f:
             config = yaml.safe_load(f)
         diff_config = config["decoder_diff"]['diffusion_config']
+        diff_config['pad_tok_id'] = self.NT
+        diff_config['resume_checkpoint'] = False
         self.diff_obj = create_diffusion(**diff_config)
  
     def append_null_token(self, intseq):

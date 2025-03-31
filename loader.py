@@ -290,7 +290,7 @@ class LoaderHF(LoaderObj):
             'test':  self.build_dataloader(dataset['test'] , batch_size, 0, collate_fn),
         }
 
-class LoaderDis(LoaderObj):
+class LoaderCls(LoaderObj):
     def __init__(
         self,
         dataset_path: str,
