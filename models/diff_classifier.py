@@ -166,7 +166,7 @@ class Classifier(nn.Module):
     def total_params(self):
         return sum([m.numel() for m in self.parameters() if m.requires_grad])
 
-    def forward(self, latent, t):
+    def forward(self, latent, timesteps):
         """
         Model is built to classify noisy latents
         - During training, peptide sequences are turned into x_start and forward
@@ -179,7 +179,7 @@ class Classifier(nn.Module):
         time_emb = self.time_embed(mp.FourierFeatures(timesteps, 1, 10000, self.timestep_dimension))
 
         # Process latent
-        latent += self.alpha * self.pos[:, :latent.shape[1]]
+        latent += self.alpha * self.pos[:latent.shape[1]]
         out = self.Main(latent, time_emb)
         
         # Logits

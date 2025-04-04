@@ -37,20 +37,106 @@ def main():
     }
     loader = LoaderCls(**load_config)
 
-    print(next(iter(loader.dataloader['test'])))
+    batch  = next(iter(loader.dataloader['test']))
+    print(batch)
 
     #########
     # Model #
     #########
+    
     diff_dir = "/cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27"
     classifier = Classifier(
         diff_dir, 
         num_input_tokens   = len(loader.amod_dic) + 1,
-        num_output_classes = len(loader.label_dict),
+        num_output_classes = 40,#len(loader.label_dict),
         null_token         = loader.amod_dic['X'],
     )
+    classifier.to(device)
     print(f"<MAINCOMMENT> Total classifier parameters: {classifier.total_params():,}")
+
+    opt = th.optim.Adam(classifier.parameters(), 1e-4)
+
+    ##############
+    # Evaluation #
+    ##############
+
+    def evaluation():
+        classifier.eval()
+
+        timesteps = classifier.diff_obj.num_timesteps
+        T = [0, int(timesteps//3), int(timesteps//1.5)]
+        
+        sums = {'total_inst': 0}
+        for t in T:
+            sums[f'ce_{t}'] = 0
+            sums[f'correct_{t}'] = 0
+
+        pbar = tqdm(loader.dataloader['test'], leave=False)
+        for step, batch in enumerate(pbar):
+            batchdev = U.Dict2dev(batch, device)
+            bs, sl = batchdev['intseq'].shape
+            sums[f'total_inst'] += bs
+            for t in T:
+                
+                ts = th.full((bs,), int(t), dtype=th.int32, device=device)
+                latents = classifier.get_noisy_x(batchdev['intseq'], ts)
+                
+                with th.no_grad():
+                    out = classifier(latents, ts)
+                
+                cross_entropy_loss = nn.functional.cross_entropy(out, batchdev['labels'].type(th.int64), reduction='none')
+                sums[f'ce_{t}'] += cross_entropy_loss.sum()
+
+                sums[f'correct_{t}'] += (out.argmax(-1) == batchdev['labels']).sum()
+
+        
+        # Averages
+        out = {'ce_all': 0, 'accuracy_all': 0}
+        for t in T:
+            out[f'ce_{t}'] = float(sums[f'ce_{t}'])    / sums[f'total_inst']
+            out[f'accuracy_{t}'] = int(sums[f'correct_{t}']) / sums[f'total_inst']
+            out['ce_all'] += out[f'ce_{t}']
+            out['accuracy_all'] += out[f'accuracy_{t}']
+        out['ce_all'] /= len(T)
+        out['accuracy_all'] /= len(T)
+
+        return out
+
+    ##############
+    # Train step #
+    ##############
     
+    def train_step(batch):
+        bs, sl = batch['intseq'].shape
+        
+        batchdev = U.Dict2dev(batch, device)
+        ts = th.empty(bs, device=device).uniform_(0, classifier.diff_obj.num_timesteps).type(th.int32)
+        latents = classifier.get_noisy_x(batchdev['intseq'], ts)
+        
+        classifier.train()
+        out = classifier(latents, ts)
+        loss = nn.functional.cross_entropy(out, batchdev['labels'].type(th.int64))
+
+        loss.backward()
+        opt.step()
+
+        return loss
+
+    ############
+    # Training #
+    ############
+
+    def train(epochs=1):
+        for epoch in range(epochs):
+            # Progress bar
+            pbar = tqdm(loader.dataloader['train'], smoothing=0.1)
+            for step, batch in enumerate(pbar):
+                loss = train_step(batch)
+                pbar.set_description(f"Loss: {loss:.3f}")
+            out = evaluation()
+            print(out)
+
+    train(10)
 
 if __name__ == '__main__':
 

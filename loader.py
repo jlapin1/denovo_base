@@ -66,12 +66,13 @@ exceptions = {
 }
 
 class LoaderObj:
-    def build_dataloader(self, dataset, batch_size, num_workers, collate_fn):
+    def build_dataloader(self, dataset, batch_size, num_workers, collate_fn, shuffle=False):
         return DataLoader(
             dataset,
             batch_size=batch_size,
             num_workers=num_workers,
-            collate_fn=collate_fn
+            collate_fn=collate_fn,
+            shuffle=shuffle,
         )
     
     def create_sequence_dictionary(self, dictionary_path):
@@ -324,18 +325,10 @@ class LoaderCls(LoaderObj):
             length = len(tokenized_sequence)
             full_seq = tokenized_sequence + (max_seq-length) * ['X']
             intseq = [dic[a] for a in full_seq[:max_seq]]
-            #target = self.append_null_token(intseq)
-            #target = self.replace_with_eos_token(target, length)
-            #x_start_mean = self.seq_embed(target)
-            #std = _extract_into_tensor(
-            #    self.diff_obj.sqrt_one_minus_alphas_cumprod,
-            #    th.tensor([0]).to(x_start_mean.device),
-            #    x_start_mean.shape,
-            #)
-            #x_start = self.diff_obj.get_x_start(x_start_mean, std)
             
             example['intseq'] = intseq
-            example['label'] = self.label_dict[example['experiment_name']]
+            #example['label'] = self.label_dict[example['experiment_name']]
+            example['label'] = example['peptide_length']-1
 
             return example
 
@@ -355,13 +348,15 @@ class LoaderCls(LoaderObj):
         if 'pep_length' in kwargs.keys():
             dataset = dataset.filter(
                 lambda example: 
-                (len(example['intseq']) >= kwargs['pep_length'][0]) &
-                (len(example['intseq']) <= kwargs['pep_length'][1])
+                (example['peptide_length'] >= kwargs['pep_length'][0]) &
+                (example['peptide_length'] <= kwargs['pep_length'][1])
             )
 
         #dataset = dataset.shuffle()
         #dataset = dataset.flatten_indices()
         dataset = dataset['train'].train_test_split(test_size=0.1)
+        
+        self.dataset = dataset
 
         def local_collate_fn(batch_list):
             intseq = th.stack([th.tensor(m['intseq'], dtype=th.int32) for m in batch_list])
@@ -369,9 +364,8 @@ class LoaderCls(LoaderObj):
 
             return {'intseq': intseq, 'labels': labels}
 
-
         self.dataloader = {
-            'train': self.build_dataloader(dataset['train'], batch_size, 0, local_collate_fn),
+            'train': self.build_dataloader(dataset['train'], batch_size, 0, local_collate_fn, shuffle=True),
             'test': self.build_dataloader(dataset['test'], batch_size, 0, local_collate_fn),
         }
 
