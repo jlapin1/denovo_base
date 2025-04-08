@@ -32,6 +32,8 @@ class Classifier(nn.Module):
         self.NT = null_token
         self.EOS = eos_token
         self.dir = diff_dir
+        self.num_input_tokens = num_input_tokens
+        self.running_units = running_units
         
         """Diffusion object"""
         self.configure_diffusion_object(diff_dir)
@@ -51,7 +53,7 @@ class Classifier(nn.Module):
         )
 
         """seq_emb"""
-        self.configure_seq_embed(num_input_tokens, running_units)
+        self.configure_seq_embed(diff_dir)
         
         """Transformer blocks"""
         attention_dict = {
@@ -89,22 +91,26 @@ class Classifier(nn.Module):
             nn.Linear(running_units, num_output_classes),
         )
     
-    def configure_seq_embed(self, num_input_tokens, running_units):
+    def load_weights(self, ckpt):
+        self.load_state_dict(th.load(ckpt, map_location=device))
+
+    def configure_seq_embed(self, svdir):
         # Layer
-        self.seq_emb = nn.Embedding(num_input_tokens, running_units, padding_idx=self.NT)
+        self.seq_emb = nn.Embedding(self.num_input_tokens, self.running_units, padding_idx=self.NT)
         
-        # Locate the saved weight
-        weights_path = glob(os.path.join(self.dir, "weights/*high*wts"))[0]
-        weight_dict = th.load(weights_path, map_location=device,)
-        seq_emb_weight = weight_dict['decoder.seq_emb.weight']
-        
-        # Assign the weight
-        assert self.seq_emb.weight.shape == seq_emb_weight.shape, seq_emb_weight.shape
-        with th.no_grad():
-            self.seq_emb.weight = nn.Parameter(seq_emb_weight)
-        
-        # Don't train the seq_emb
-        self.seq_emb.weight.requires_grad = False
+        if svdir is not None:
+            # Locate the saved weight
+            weights_path = glob(os.path.join(svdir, "weights/*high*wts"))[0]
+            weight_dict = th.load(weights_path, map_location=device,)
+            seq_emb_weight = weight_dict['decoder.seq_emb.weight']
+            
+            # Assign the weight
+            assert self.seq_emb.weight.shape == seq_emb_weight.shape, seq_emb_weight.shape
+            with th.no_grad():
+                self.seq_emb.weight = nn.Parameter(seq_emb_weight)
+            
+            # Don't train the seq_emb
+            self.seq_emb.weight.requires_grad = False
 
     def configure_diffusion_object(self, diff_dir):
         yaml_file = os.path.join(diff_dir, "yaml", "config.yaml")

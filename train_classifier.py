@@ -19,6 +19,7 @@ import wandb
 from glob import glob
 import metrics as met
 import pandas as pd
+import sys
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
@@ -54,7 +55,7 @@ def main():
     classifier.to(device)
     print(f"<MAINCOMMENT> Total classifier parameters: {classifier.total_params():,}")
 
-    opt = th.optim.Adam(classifier.parameters(), 1e-4)
+    opt = th.optim.Adam(classifier.parameters(), 1e-5)
 
     ##############
     # Evaluation #
@@ -108,7 +109,7 @@ def main():
     
     def train_step(batch):
         bs, sl = batch['intseq'].shape
-        
+        opt.zero_grad()
         batchdev = U.Dict2dev(batch, device)
         ts = th.empty(bs, device=device).uniform_(0, classifier.diff_obj.num_timesteps).type(th.int32)
         latents = classifier.get_noisy_x(batchdev['intseq'], ts)
@@ -127,6 +128,12 @@ def main():
     ############
 
     def train(epochs=1):
+        timestamp = U.timestamp()
+        save_directory = os.path.join('save', timestamp)
+        weights_directory = os.path.join(save_directory, "weights")
+        U.create_experiment(save_directory, svwts=True)
+
+        best_score = 1e10
         for epoch in range(epochs):
             # Progress bar
             pbar = tqdm(loader.dataloader['train'], smoothing=0.1)
@@ -135,8 +142,17 @@ def main():
                 pbar.set_description(f"Loss: {loss:.3f}")
             out = evaluation()
             print(out)
+            if out['ce_all'] < best_score:
+                best_score = out['ce_all']
+                files = glob(os.path.join(weights_directory, "*.wts"))
+                for file in files: os.remove(file)
+                ckpt_name = f"model_epoch={epoch}_ce={best_score}.wts"
+                save_weights(classifier, os.path.join(weights_directory, ckpt_name))
 
-    train(10)
+    train(int(sys.argv[1]))
+
+def save_weights(model, fp='./model.wts'):
+    th.save(model.state_dict(), fp)
 
 if __name__ == '__main__':
 

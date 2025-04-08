@@ -4,6 +4,7 @@ from models.encoder import Encoder
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
+from models.diff_classifier import Classifier
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -103,6 +104,7 @@ class Seq2SeqDiff(Seq2Seq):
         encoder_config,
         decoder_config,
         diff_config,
+        classifier_config,
         ensemble_config,
         top_peaks,
         token_dict,
@@ -123,6 +125,15 @@ class Seq2SeqDiff(Seq2Seq):
             diff_obj           = self.diff_obj,
             **decoder_config,
         )
+
+        self.classifier = Classifier(
+            classifier_config['diffdir'],
+            num_input_tokens=decoder_config['num_inp_tokens'],
+            num_output_classes=classifier_config['num_output_classes'],
+            null_token=self.decoder.NT,
+        )
+        self.classifier.load_weights(classifier_config['ckpt'])
+        self.classifier.eval()
         
         self.ens_size = ensemble_config['ensemble_n']
         self.mass_tol = eval(ensemble_config['mass_tol'])

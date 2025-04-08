@@ -7,7 +7,6 @@ from torch import nn
 I = nn.init
 # beam search dependencies
 import collections
-import einops
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import heapq
 from models.diffusion.gaussian_diffusion import _extract_into_tensor

@@ -1,4 +1,4 @@
-eval_only: False
+eval_only: True
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
@@ -17,7 +17,7 @@ lr_floor: 5.0e-5
 lr_decay_steps: 14100*90
 
 # Loading previous weights
-prev_wts: # Load weights from previous run (project path->timestamp)
+prev_wts: /cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27 # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
 save_weights: False
@@ -133,6 +133,9 @@ decoder_diff:
     loss_update_granu: 20
     schedule_update_stride: 2000000
     use_loss_mask: False
+  classifier_config:
+    ckpt: /cmnfs/home/j.lapin/projects/denovo_base/save/2025-04-07_09-32-02/weights/model_epoch=10_ce=0.1410470781376049.wts
+    num_output_classes: 40
   model_config:
     running_units: 512
     sequence_length: 30

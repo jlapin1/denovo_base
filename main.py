@@ -8,7 +8,6 @@ import path
 from loader import LoaderHF
 import numpy as np
 from models.encoder import Encoder
-from models.depthcharge.SpectrumTransformerEncoder import dc_encoder
 from models.heads import SequenceHead, ClassifierHead
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
@@ -533,15 +532,18 @@ class DenovoDiffusionObj(BaseDenovo):
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
         self.diff_config = config['decoder_diff']['diffusion_config']
-        
+        config['decoder_diff']['classifier_config']['diffdir'] = config['prev_wts']
+
         from models.seq2seq import Seq2SeqDiff
 
         # diffusion object created inside Seq2Seq
         self.model = Seq2SeqDiff(
-            encoder_config  = config['encoder_dict'], 
-            decoder_config  = config['decoder_diff']['model_config'], 
-            diff_config     = config['decoder_diff']['diffusion_config'],
-            ensemble_config = config['decoder_diff']['ensemble'], 
+            encoder_config    = config['encoder_dict'], 
+            decoder_config    = config['decoder_diff']['model_config'], 
+            diff_config       = config['decoder_diff']['diffusion_config'],
+            ensemble_config   = config['decoder_diff']['ensemble'],
+            classifier_config = config['decoder_diff']['classifier_config'],
+
             top_peaks = config['top_peaks'], 
             max_peptide_length = config['pep_length'][1], 
             token_dict = self.data.amod_dic,
