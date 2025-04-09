@@ -185,8 +185,8 @@ class Classifier(nn.Module):
         time_emb = self.time_embed(mp.FourierFeatures(timesteps, 1, 10000, self.timestep_dimension))
 
         # Process latent
-        latent += self.alpha * self.pos[:latent.shape[1]]
-        out = self.Main(latent, time_emb)
+        latent_ = latent + self.alpha * self.pos[:latent.shape[1]]
+        out = self.Main(latent_, time_emb)
         
         # Logits
         out = self.final(out)

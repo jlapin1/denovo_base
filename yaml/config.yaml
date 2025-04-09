@@ -133,9 +133,6 @@ decoder_diff:
     loss_update_granu: 20
     schedule_update_stride: 2000000
     use_loss_mask: False
-  classifier_config:
-    ckpt: /cmnfs/home/j.lapin/projects/denovo_base/save/2025-04-07_09-32-02/weights/model_epoch=10_ce=0.1410470781376049.wts
-    num_output_classes: 40
   model_config:
     running_units: 512
     sequence_length: 30
@@ -161,3 +158,10 @@ decoder_diff:
   ensemble:
     ensemble_n: 10
     mass_tol: 1e-2
+
+# Leaving ckpt empty deactivate classifier guided diffusion
+classifier_config:
+  ckpt: #/cmnfs/home/j.lapin/projects/denovo_base/save/2025-04-07_09-32-02/weights/model_epoch=10_ce=0.1410470781376049.wts
+  num_output_classes: 40
+  class_index: 6
+  scale: 10000

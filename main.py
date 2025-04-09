@@ -8,7 +8,7 @@ import path
 from loader import LoaderHF
 import numpy as np
 from models.encoder import Encoder
-from models.heads import SequenceHead, ClassifierHead
+from models.diff_classifier import Classifier
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 import os
@@ -269,7 +269,7 @@ class BaseDenovo:
             for m in intseq
         ]
 
-    def evaluation(self, dset='val', max_batches=1e10, save_df=False, kwargs={}):
+    def evaluation(self, dset='val', max_batches=1e10, save_df=False, no_grad=True, kwargs={}):
         
         # Dataframe
         if save_df:
@@ -305,7 +305,11 @@ class BaseDenovo:
 
             #print("\rEvaluation step %d"%(i+1), end='')
             batchdev = U.Dict2dev(batch, device)
-            with th.no_grad():
+            if no_grad:
+                with th.no_grad():
+                    seqint, target, loss_mask = self.inptarg(batchdev)
+                    prediction, probs = self.model.predict_sequence(batchdev, **kwargs)
+            else:
                 seqint, target, loss_mask = self.inptarg(batchdev)
                 prediction, probs = self.model.predict_sequence(batchdev, **kwargs)
             
@@ -532,7 +536,6 @@ class DenovoDiffusionObj(BaseDenovo):
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
         self.diff_config = config['decoder_diff']['diffusion_config']
-        config['decoder_diff']['classifier_config']['diffdir'] = config['prev_wts']
 
         from models.seq2seq import Seq2SeqDiff
 
@@ -542,14 +545,13 @@ class DenovoDiffusionObj(BaseDenovo):
             decoder_config    = config['decoder_diff']['model_config'], 
             diff_config       = config['decoder_diff']['diffusion_config'],
             ensemble_config   = config['decoder_diff']['ensemble'],
-            classifier_config = config['decoder_diff']['classifier_config'],
 
             top_peaks = config['top_peaks'], 
             max_peptide_length = config['pep_length'][1], 
             token_dict = self.data.amod_dic,
             masses_path = config['loader']['masses_path'],
         )
-        
+
         print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
         
@@ -557,10 +559,29 @@ class DenovoDiffusionObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            self.load_saved_weights(self.opt, "opt", config['load_last'])
-            U.optimizer_to(self.opt, device)
+            #self.load_saved_weights(self.opt, "opt", config['load_last'])
+            #U.optimizer_to(self.opt, device)
         
         self.model.to(device)
+
+        # Classifier
+        classifier_config = config['classifier_config']
+        if classifier_config['ckpt']:
+            classifier_config['diffdir'] = config['prev_wts']
+            self.classifier = Classifier(
+                classifier_config['diffdir'],
+                num_input_tokens=config['decoder_diff']['model_config']['num_inp_tokens'],
+                num_output_classes=classifier_config['num_output_classes'],
+                null_token=self.model.decoder.NT,
+            )
+            self.classifier.load_weights(classifier_config['ckpt'])
+            self.classifier.eval()
+            self.classifier.to(device)
+            self.eval_kwargs['cls_dict'] = {
+                'model': self.classifier, 
+                'index': classifier_config['class_index'], 
+                'scale': classifier_config['scale'],
+            }
         
     def inptarg(self, batch):
         
@@ -667,7 +688,7 @@ if __name__ == '__main__':
             'epochs', 'prev_wts', 'load_last', 'lr_schedule',
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
-            'top_peaks',
+            'top_peaks', 'classifier_config',
         ]:
             config[key] = config_[key]
         timestamp = config['prev_wts']
@@ -712,9 +733,18 @@ if __name__ == '__main__':
                 D.model.decoder.clamp_denoised = evc['clamp_denoised']
             if evc['n'] is not None:
                 D.model.ens_size = evc['n']
+        
+        # Turn gradients off for de novo model
+        for parm in D.model.parameters(): parm.requires_grad=False
 
         # Run evaluation
-        out, df = D.evaluation(dset=evc['set'], max_batches=max_batches, save_df=True)
+        out, df = D.evaluation(
+            dset=evc['set'], 
+            max_batches=max_batches, 
+            save_df=evc['save'], 
+            no_grad=False, 
+            kwargs=D.eval_kwargs,
+        )
         
         # Saving results
         if evc['save']:

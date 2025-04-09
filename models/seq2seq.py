@@ -4,7 +4,6 @@ from models.encoder import Encoder
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
-from models.diff_classifier import Classifier
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -104,7 +103,6 @@ class Seq2SeqDiff(Seq2Seq):
         encoder_config,
         decoder_config,
         diff_config,
-        classifier_config,
         ensemble_config,
         top_peaks,
         token_dict,
@@ -126,15 +124,6 @@ class Seq2SeqDiff(Seq2Seq):
             **decoder_config,
         )
 
-        self.classifier = Classifier(
-            classifier_config['diffdir'],
-            num_input_tokens=decoder_config['num_inp_tokens'],
-            num_output_classes=classifier_config['num_output_classes'],
-            null_token=self.decoder.NT,
-        )
-        self.classifier.load_weights(classifier_config['ckpt'])
-        self.classifier.eval()
-        
         self.ens_size = ensemble_config['ensemble_n']
         self.mass_tol = eval(ensemble_config['mass_tol'])
         # Scale
@@ -147,6 +136,12 @@ class Seq2SeqDiff(Seq2Seq):
             }
             self.int2mass = {Int: self.str2mass.get(string, 0) for string, Int in self.decoder.outdict.items()}
             self.masses = th.tensor([m[1] for m in sorted(self.int2mass.items())])
+
+    def condition_function(self, classifier, latent, t, class_index, scale):
+        latent.requires_grad = True
+        out = classifier(latent, t)[:, class_index]
+        out.mean().backward()
+        return latent.grad * scale
     
     def expand_batch(self, batch, n=None):
         n = self.ens_size if n is None else n
@@ -159,18 +154,22 @@ class Seq2SeqDiff(Seq2Seq):
         batch['peplen'] = batch['peplen'][:,None].tile(1, n).reshape(-1)
         return batch
 
-    def forward(self, batch, save_xcur=False):
+    def forward(self, batch, save_xcur=False, cond_fn=None):
         embedding = self.encoder_embedding(batch)
-        final, logits = self.decoder.predict_sequence(embedding, batch, save_xcur=save_xcur)
+        final, logits = self.decoder.predict_sequence(embedding, batch, save_xcur=save_xcur, cond_fn=cond_fn)
         return final, logits
 
-    def predict_sequence(self, batch, save_xcur=False, n=None):
+    def predict_sequence(self, batch, save_xcur=False, n=None, cls_dict=None):
         bs, sl = batch['mz'].shape
         n = self.ens_size if n==None else n
+        cond_fn = (
+            None if cls_dict == None else
+            lambda latent, t: self.condition_function(cls_dict['model'], latent, t, cls_dict['index'], cls_dict['scale']) 
+        )
 
         full_size = bs*n
         batch = self.expand_batch(batch, n=n)
-        seqs, logits = self(batch, save_xcur=save_xcur)
+        seqs, logits = self(batch, save_xcur=save_xcur, cond_fn=cond_fn)
         #uniqs, inds, counts = seqs.unique(dim=0, return_inverse=True, return_counts=True)
         
         seqs_rs = seqs.reshape(bs, n, -1)
