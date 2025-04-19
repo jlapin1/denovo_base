@@ -7,7 +7,7 @@ from torch import nn
 I = nn.init
 # beam search dependencies
 import collections
-import einops
+#import einops
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import heapq
 

@@ -7,7 +7,6 @@ from torch import nn
 I = nn.init
 # beam search dependencies
 import collections
-import einops
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import heapq
 from models.diffusion.gaussian_diffusion import _extract_into_tensor
@@ -293,7 +292,7 @@ class DenovoDiffusionDecoder(nn.Module):
             out_dict['var'] = logvar_fraction
         return out_dict
 
-    def predict_sequence(self, embedding, batch, save_xcur=False):
+    def predict_sequence(self, embedding, batch, save_xcur=False, cond_fn=None):
         shape = (
             embedding['emb'].shape[0],
             batch['intseq'].shape[1] + 1,
@@ -331,7 +330,8 @@ class DenovoDiffusionDecoder(nn.Module):
             denoised_fn=self.clamp if self.clamp_denoised else None,
             clip_denoised=self.clip_denoised,
             model_kwargs=model_kwargs,
-            save_xcur=save_xcur
+            save_xcur=save_xcur,
+            cond_fn=cond_fn,
         )
         logits = self.get_logits(units) # bs, 31, predcats
         final = logits.argmax(dim=-1)

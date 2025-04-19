@@ -65,7 +65,46 @@ exceptions = {
     'Q(+.98)': 'Q+0.984',
 }
 
-class LoaderHF:
+class LoaderObj:
+    def build_dataloader(self, dataset, batch_size, num_workers, collate_fn, shuffle=False):
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            collate_fn=collate_fn,
+            shuffle=shuffle,
+        )
+    
+    def create_sequence_dictionary(self, dictionary_path):
+        amod_dic = {
+            line.split()[0]:m for m, line in enumerate(open(dictionary_path))
+        }
+        amod_dic['X'] = len(amod_dic)
+        amod_dic_rev = {b:a for a,b in amod_dic.items()}
+
+        return amod_dic, amod_dic_rev
+    
+    def create_label_dictionary(self, dataset_path):
+        filepath = os.path.join(dataset_path, "parquet/labeled_sequences/species_list.txt")
+        List = open(filepath).read().split("\n")
+        #tsv = pd.read_csv(filepath, sep='\t', header=None, names=['species_name', 'count'])
+        label_dict = {j:i for i,j  in enumerate(List)}
+        label_dictr = {j:i for i,j in label_dict.items()}
+
+        return label_dict, label_dictr
+    
+    def create_tokenizer(self, tokenizer_path):
+        # Tokenizer
+        # - RULES
+        #   1. There is a file named enumerate_tokens.py with a subroutine named
+        #      partition_modified_sequence
+        sys.path.append(tokenizer_path)
+        from enumerate_tokens import partition_modified_sequence
+        tokenizer = partition_modified_sequence
+
+        return tokenizer
+
+class LoaderHF(LoaderObj):
     def __init__(self, 
         train_dataset_path: str,
         train_name: str=None,
@@ -247,16 +286,100 @@ class LoaderHF:
         # Dataloaders
         num_workers = min(self.dataset['train'].n_shards, num_workers)
         self.dataloader = {
-            'train': self.build_dataloader(dataset['train'], batch_size, num_workers),
-            'val':   self.build_dataloader(dataset['val']  , batch_size, 0),
-            'test':  self.build_dataloader(dataset['test'] , batch_size, 0),
+            'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn),
+            'val':   self.build_dataloader(dataset['val']  , batch_size, 0, collate_fn),
+            'test':  self.build_dataloader(dataset['test'] , batch_size, 0, collate_fn),
         }
 
-    def build_dataloader(self, dataset, batch_size, num_workers):
-        return DataLoader(
-            dataset,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            collate_fn=collate_fn
+class LoaderCls(LoaderObj):
+    def __init__(
+        self,
+        dataset_path: str,
+        dictionary_path: str=None,
+        tokenizer_path: str=None,
+        num_workers: int=8,
+        batch_size: int=100,
+        **kwargs
+    ):
+        tokenizer_path = dataset_path if tokenizer_path==None else tokenizer_path
+        
+        # Dictionary
+        if dictionary_path is not None:
+            self.amod_dic, self.amod_dicr = self.create_sequence_dictionary(dictionary_path)
+
+        # Class mapping
+        self.label_dict, self.label_dictr = self.create_label_dictionary(dataset_path)
+        
+        # Tokenizer
+        self.tokenizer = self.create_tokenizer(tokenizer_path)
+
+        # Load dataset
+        data_files = os.path.join(dataset_path, "parquet/labeled_sequences", "*parquet")
+        dataset = load_dataset(
+            'parquet',
+            data_files=data_files,
         )
+
+        def map_fn_local(example, tokenizer, dic, max_seq):
+            tokenized_sequence = tokenizer(example['modified_sequence'])
+            length = len(tokenized_sequence)
+            full_seq = tokenized_sequence + (max_seq-length) * ['X']
+            intseq = [dic[a] for a in full_seq[:max_seq]]
+            
+            example['intseq'] = intseq
+            example['label'] = self.label_dict[example['experiment_name']]
+            #example['label'] = example['peptide_length']-1
+
+            return example
+
+        # Map
+        lambda_function = lambda example: map_fn_local(
+            example,
+            tokenizer=self.tokenizer,
+            dic=self.amod_dic,
+            max_seq=kwargs['pep_length'][1],
+        )
+        dataset = dataset.map(
+            lambda_function, 
+            remove_columns=['modified_sequence', '__index_level_0__'],
+        )
+
+        # Filter for length
+        if 'pep_length' in kwargs.keys():
+            dataset = dataset.filter(
+                lambda example: 
+                (example['peptide_length'] >= kwargs['pep_length'][0]) &
+                (example['peptide_length'] <= kwargs['pep_length'][1])
+            )
+
+        #dataset = dataset.shuffle()
+        #dataset = dataset.flatten_indices()
+        dataset = dataset['train'].train_test_split(test_size=0.1)
+        
+        self.dataset = dataset
+
+        def local_collate_fn(batch_list):
+            intseq = th.stack([th.tensor(m['intseq'], dtype=th.int32) for m in batch_list])
+            labels = th.cat([th.tensor([m['label']], dtype=th.int32) for m in batch_list])
+
+            return {'intseq': intseq, 'labels': labels}
+
+        self.dataloader = {
+            'train': self.build_dataloader(dataset['train'], batch_size, 0, local_collate_fn, shuffle=True),
+            'test': self.build_dataloader(dataset['test'], batch_size, 0, local_collate_fn),
+        }
+
+    def append_null_token(self, intseq):
+        bs, sl = intseq.shape
+        nulls = th.fill(th.empty(bs, dtype=th.int64), self.NT).to(intseq.device)
+        out = th.cat([intseq, nulls[:,None]], dim=-1)
+
+        return out
+
+    def replace_with_eos_token(self, intseq, lengths):
+        bs, sl = intseq.shape
+        eos_inds = [th.arange(bs, device=intseq.device), lengths]
+        intseq[eos_inds] = self.EOS
+
+        return intseq
 

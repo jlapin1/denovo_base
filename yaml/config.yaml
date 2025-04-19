@@ -8,16 +8,16 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 2.0e-4 # phase 2 LR
+lr_warmup_end: 1.5e-4 # phase 2 LR
 lr_warmup_steps: 20000
 # Phase 2 - Flat
-lr_flat_steps: 0
+lr_flat_steps: 266000
 # Phase 3 - Decay
 lr_floor: 5.0e-5
-lr_decay_steps: 14100*90
+lr_decay_steps: 975000
 
 # Loading previous weights
-prev_wts: # Load weights from previous run (project path->timestamp)
+prev_wts: #/cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27 # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
 save_weights: True
@@ -158,3 +158,10 @@ decoder_diff:
   ensemble:
     ensemble_n: 10
     mass_tol: 1e-2
+
+# Leaving ckpt empty deactivate classifier guided diffusion
+classifier_config:
+  ckpt: #save/2025-04-09_16-07-11/weights/model_epoch=99_ce=0.9836847015079581.wts
+  num_output_classes: 9
+  class_index: 8
+  scale: 100

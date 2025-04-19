@@ -758,6 +758,21 @@ class GaussianDiffusion:
             return t.float() * (1000.0 / self.num_timesteps)
         return t
 
+    def condition_mean(self, cond_fn, p_mean_var, x, t, model_kwargs=None):
+        """
+        Compute the mean for the previous step, given a function cond_fn that
+        computes the gradient of a conditional log probability with respect to
+        x. In particular, cond_fn computes grad(log(p(y|x))), and we want to
+        condition on y.
+        """
+
+        # TODO: Train classifiers with scale_timesteps
+        gradient = cond_fn(x, t)
+        new_mean = (
+            p_mean_var['mean'].float() + p_mean_var['variance'] * gradient.float()
+        )
+        return new_mean
+
     def p_sample(
         self,
         model,
@@ -767,6 +782,7 @@ class GaussianDiffusion:
         denoised_fn=None,
         model_kwargs=None,
         top_p=None,
+        cond_fn=None,
     ):
         """
         Sample x_{t-1} from the model at the given timestep.
@@ -802,9 +818,16 @@ class GaussianDiffusion:
 
         else:
             noise = th.randn_like(x)
+        
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
+
+        if cond_fn is not None:
+            out['mean'] = self.condition_mean(
+                cond_fn, out, x, t, model_kwargs={},
+            )
+
         sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
         return {
             "sample": sample,
@@ -1137,6 +1160,7 @@ class GaussianDiffusion:
         generate_by_mix_part=0,
         save_xcur=False,
         save_xstart=False,
+        cond_fn=None,
     ):
         loop_fn = self.p_sample_loop_progressive
         """sample = loop_fn(
@@ -1188,19 +1212,20 @@ class GaussianDiffusion:
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
             
-            with th.no_grad():
-                out = self.p_sample(
-                    model,
-                    img,
-                    t,
-                    clip_denoised=False,
-                    denoised_fn=denoised_fn if i>0 else None,
-                    model_kwargs=model_kwargs,
-                    top_p=top_p,
-                )
-                if save_xcur: self.my_xcur_save.append(img)
-                img = out["sample"]
-                if save_xstart: self.my_xstart_save.append(out['pred_xstart'])
+            #with th.no_grad():
+            out = self.p_sample(
+                model,
+                img,
+                t,
+                clip_denoised=False,
+                denoised_fn=denoised_fn if i>0 else None,
+                model_kwargs=model_kwargs,
+                top_p=top_p,
+                cond_fn=cond_fn,
+            )
+            if save_xcur: self.my_xcur_save.append(img)
+            img = out["sample"]
+            if save_xstart: self.my_xstart_save.append(out['pred_xstart'])
 
         final = out
         if save_xcur: self.my_xcur_save.append(final['sample'])
