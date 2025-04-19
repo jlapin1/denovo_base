@@ -19,7 +19,6 @@ import wandb
 from glob import glob
 import metrics as met
 import pandas as pd
-import sys
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
@@ -49,7 +48,7 @@ def main():
     classifier = Classifier(
         diff_dir, 
         num_input_tokens   = len(loader.amod_dic) + 1,
-        num_output_classes = 40,#len(loader.label_dict),
+        num_output_classes = len(loader.label_dict),
         null_token         = loader.amod_dic['X'],
     )
     classifier.to(device)
@@ -139,7 +138,7 @@ def main():
             pbar = tqdm(loader.dataloader['train'], smoothing=0.1)
             for step, batch in enumerate(pbar):
                 loss = train_step(batch)
-                pbar.set_description(f"Loss: {loss:.3f}")
+                pbar.set_description(f"Epoch {epoch}, Loss: {loss:.3f}")
             out = evaluation()
             print(out)
             if out['ce_all'] < best_score:
@@ -149,11 +148,10 @@ def main():
                 ckpt_name = f"model_epoch={epoch}_ce={best_score}.wts"
                 save_weights(classifier, os.path.join(weights_directory, ckpt_name))
 
-    train(int(sys.argv[1]))
+    train(100)
 
 def save_weights(model, fp='./model.wts'):
     th.save(model.state_dict(), fp)
 
 if __name__ == '__main__':
-
     main()

@@ -327,8 +327,8 @@ class LoaderCls(LoaderObj):
             intseq = [dic[a] for a in full_seq[:max_seq]]
             
             example['intseq'] = intseq
-            #example['label'] = self.label_dict[example['experiment_name']]
-            example['label'] = example['peptide_length']-1
+            example['label'] = self.label_dict[example['experiment_name']]
+            #example['label'] = example['peptide_length']-1
 
             return example
 
@@ -341,7 +341,7 @@ class LoaderCls(LoaderObj):
         )
         dataset = dataset.map(
             lambda_function, 
-            remove_columns=['experiment_name', 'modified_sequence', '__index_level_0__'],
+            remove_columns=['modified_sequence', '__index_level_0__'],
         )
 
         # Filter for length
