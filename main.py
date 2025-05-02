@@ -521,7 +521,7 @@ class DenovoArDSObj(BaseDenovo):
         })
 
 class DenovoDiffusionObj(BaseDenovo):
-    def __init__(self, config, diff_config=None, svdir='./dswts/'):
+    def __init__(self, config, svdir='./dswts/'):
         super().__init__(
             config=config, 
             svdir=svdir
@@ -663,6 +663,35 @@ class DenovoDiffusionObj(BaseDenovo):
     def on_eval_end(self):
         pass
 
+class DenovoMDLMObj(BaseDenovo):
+    def __init__(self, config, svdir='./save/'):
+        super().__init__(
+            config=config, 
+            svdir=svdir
+        )
+
+        from models.seq2seq import Seq2SeqMDLM
+        diff_config = {
+            'T': 0,
+            'parameterization': 'subs',
+            'sampling': {
+                'predictor': 'ddpm_cache',
+            },
+        }
+        config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
+        config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
+        config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
+        self.diff_config = config['decoder_diff']['diffusion_config']
+        self.diff_obj = Seq2SeqMDLM(
+            encoder_config = config['encoder_dict'],
+            decoder_config = None,
+            diff_config = diff_config,
+            top_peaks = config['top_peaks'], 
+            max_peptide_length = config['pep_length'][1], 
+            token_dict = self.data.amod_dic,
+            masses_path = config['loader']['masses_path'],
+        )
+
 if __name__ == '__main__':
 
     # Read yamls
@@ -706,6 +735,9 @@ if __name__ == '__main__':
     if 'diff' in config['decoder_name']:
         print("<DSCOMMENT> Using diffusion decoder")
         D = DenovoDiffusionObj(config, svdir=svdir)
+    elif 'mdlm' in config['decoder_name']:
+        print("<DSCOMMENT> Using masked diffusion language decoder")
+        D = DenovoMDLMObj(config, svdir=svdir)
     else:
         print("<DSCOMMENT> Using autoregressive decoder")
         D = DenovoArDSObj(config, svdir=svdir)

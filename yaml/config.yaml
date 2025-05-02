@@ -20,10 +20,10 @@ lr_decay_steps: 975000
 prev_wts: #/cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27 # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -52,7 +52,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 

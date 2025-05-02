@@ -4,6 +4,7 @@ from models.encoder import Encoder
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
+from models.mdlm.diffusion import Diffusion as MDLMDiffusion
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -203,4 +204,48 @@ class Seq2SeqDiff(Seq2Seq):
         logits = logits[winners]
         
         return top_sequences, logits #counts[inds][winners]
+
+class Seq2SeqMDLM(Seq2Seq):
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+        )
+        
+        # Decoder model
+        decoder_config['kv_indim'] = self.encoder.run_units
+        self.decoder = DenovoDiffusionDecoder(
+            input_output_units = diff_config['in_channel'],
+            clip_denoised      = diff_config['clip_denoised'],
+            output_sigma       = diff_config['learn_sigma'],
+            token_dict         = token_dict,
+            dec_config         = decoder_config,
+            diff_obj           = self.diff_obj,
+            **decoder_config,
+        )
+
+        # Diffusion object
+        self.diff_obj = MDLMDiffusion(diff_config, self.decoder.output_dict['<MASK>'])
+
+        self.ens_size = ensemble_config['ensemble_n']
+        self.mass_tol = eval(ensemble_config['mass_tol'])
+        # Scale
+        if 'masses_path' in kwargs:
+            path = os.path.join(kwargs['masses_path'], 'masses.tsv')
+            self.str2mass = {
+                m.split()[0]: float(m.split()[1]) 
+                for m in open(path)
+                .read().strip().split("\n")
+            }
+            self.int2mass = {Int: self.str2mass.get(string, 0) for string, Int in self.decoder.outdict.items()}
+            self.masses = th.tensor([m[1] for m in sorted(self.int2mass.items())])
 
