@@ -11,18 +11,18 @@ torch._C._jit_override_can_fuse_on_gpu(True)
 
 
 def get_noise(config, dtype=torch.float32):
-  if config.noise.type == 'geometric':
-    return GeometricNoise(config.noise.sigma_min,
-                          config.noise.sigma_max)
-  elif config.noise.type == 'loglinear':
+  if config['noise']['type'] == 'geometric':
+    return GeometricNoise(config['noise']['sigma_min'],
+                          config['noise']['sigma_max'])
+  elif config['noise']['type'] == 'loglinear':
     return LogLinearNoise()
-  elif config.noise.type == 'cosine':
+  elif config['noise']['type'] == 'cosine':
     return CosineNoise()
-  elif config.noise.type == 'cosinesqr':
+  elif config['noise']['type'] == 'cosinesqr':
     return CosineSqrNoise()
-  elif config.noise.type == 'linear':
-    return Linear(config.noise.sigma_min,
-                  config.noise.sigma_max,
+  elif config['noise']['type'] == 'linear':
+    return Linear(config['noise']['sigma_min'],
+                  config['noise']['sigma_max'],
                   dtype)
   else:
     raise ValueError(f'{config.noise.type} is not a valid noise')

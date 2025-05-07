@@ -15,7 +15,8 @@ from torch import Tensor
 
 #import dataloader
 #import models
-import models.mdlm.noise_schedule
+import models.mdlm.noise_schedule as noise_schedule
+import models.mdlm.ema as ema
 import utils
 
 LOG2 = math.log(2)
@@ -69,7 +70,7 @@ class Diffusion(L.LightningModule):
   def __init__(
       self,
       config,
-      mask_index,
+      dictionary,
       tokenizer=None,
   ):
     super().__init__()
@@ -77,20 +78,23 @@ class Diffusion(L.LightningModule):
     self.config = config
 
     self.tokenizer = tokenizer
-    self.vocab_size = self.tokenizer.vocab_size
-    self.sampler = self.config.sampling.predictor
-    self.gen_ppl_eval_model_name_or_path = self.config.eval.\
-      gen_ppl_eval_model_name_or_path
-    self.antithetic_sampling = self.config.training.antithetic_sampling
-    self.importance_sampling = self.config.training.importance_sampling
-    self.change_of_variables = self.config.training.change_of_variables
-    if (not hasattr(self.tokenizer, 'mask_token')
+    self.vocab_size = len(dictionary)#self.tokenizer.vocab_size
+    self.sampler = self.config['sampling']['predictor']
+    """self.gen_ppl_eval_model_name_or_path = self.config.eval.\
+      gen_ppl_eval_model_name_or_path"""
+    self.antithetic_sampling = self.config['training']['antithetic_sampling']
+    self.importance_sampling = self.config['training']['importance_sampling']
+    self.change_of_variables = self.config['training']['change_of_variables']
+    """if (not hasattr(self.tokenizer, 'mask_token')
         or self.tokenizer.mask_token is None):
       self.mask_index = mask_index
       #self.vocab_size += 1
     else:
-      self.mask_index = self.tokenizer.mask_token_id
-    self.parameterization = self.config.parameterization
+      self.mask_index = self.tokenizer.mask_token_id"""
+    self.mask_index = dictionary['<MASK>']
+    self.bos_token_id = dictionary['<SOS>']
+    self.eos_token_id = dictionary['<EOS>']
+    self.parameterization = self.config['parameterization']
     
     """
     if self.config.backbone == 'dit':
@@ -113,8 +117,9 @@ class Diffusion(L.LightningModule):
       raise ValueError(
         f'Unknown backbone: {self.config.backbone}')
     """
-    self.T = self.config.T
-    self.subs_masking = self.config.subs_masking
+
+    self.T = self.config['T']
+    self.subs_masking = self.config['subs_masking']
 
     self.softplus = torch.nn.Softplus()
     # metrics are automatically reset at end of epoch
@@ -130,27 +135,26 @@ class Diffusion(L.LightningModule):
 
     # generative perplexity
     self.gen_ppl_metric = Perplexity()
-    self.eval_model_tokenizer = transformers.AutoTokenizer.\
-      from_pretrained(self.gen_ppl_eval_model_name_or_path)
-    if self.eval_model_tokenizer.pad_token is None:
+    self.eval_model_tokenizer = None #transformers.AutoTokenizer.from_pretrained(self.gen_ppl_eval_model_name_or_path)
+    """if self.eval_model_tokenizer.pad_token is None:
       self.eval_model_tokenizer.pad_token =\
           self.eval_model_tokenizer.eos_token
       self.eval_model_tokenizer.pad_token_id =\
-          self.eval_model_tokenizer.eos_token_id
+          self.eval_model_tokenizer.eos_token_id"""
 
     self.noise = noise_schedule.get_noise(self.config,
                                           dtype=self.dtype)
-    if self.config.training.ema > 0:
-      self.ema = models.ema.ExponentialMovingAverage(
+    """if self.config['training']['ema'] > 0:
+      self.ema = ema.ExponentialMovingAverage(
         itertools.chain(self.backbone.parameters(),
                         self.noise.parameters()),
-        decay=self.config.training.ema)
+        decay=self.config['training']['ema'])
     else:
-      self.ema = None
+      self.ema = None"""
     
-    self.lr = self.config.optim.lr
-    self.sampling_eps = self.config.training.sampling_eps
-    self.time_conditioning = self.config.time_conditioning
+    #self.lr = self.config.optim.lr
+    self.sampling_eps = self.config['training']['sampling_eps']
+    self.time_conditioning = self.config['time_conditioning']
     self.neg_infinity = -1000000.0
     self.fast_forward_epochs = None
     self.fast_forward_batches = None

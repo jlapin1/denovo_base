@@ -1,7 +1,7 @@
 import torch as th
 from torch import nn
 from models.encoder import Encoder
-from models.diff_decoder import DenovoDiffusionDecoder
+from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
 from models.mdlm.diffusion import Diffusion as MDLMDiffusion
@@ -220,24 +220,22 @@ class Seq2SeqMDLM(Seq2Seq):
             encoder_config=encoder_config,
             top_peaks=top_peaks,
         )
-        
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
-        self.decoder = DenovoDiffusionDecoder(
-            input_output_units = diff_config['in_channel'],
-            clip_denoised      = diff_config['clip_denoised'],
-            output_sigma       = diff_config['learn_sigma'],
-            token_dict         = token_dict,
-            dec_config         = decoder_config,
-            diff_obj           = self.diff_obj,
+        self.decoder = MDLMDecoder(
+            #input_output_units = diff_config['in_channel'],
+            #clip_denoised      = diff_config['clip_denoised'],
+            #output_sigma       = diff_config['learn_sigma'],
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            #diff_obj           = self.diff_obj,
             **decoder_config,
         )
-
         # Diffusion object
-        self.diff_obj = MDLMDiffusion(diff_config, self.decoder.output_dict['<MASK>'])
+        self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict)
 
-        self.ens_size = ensemble_config['ensemble_n']
-        self.mass_tol = eval(ensemble_config['mass_tol'])
+        #self.ens_size = ensemble_config['ensemble_n']
+        #self.mass_tol = eval(ensemble_config['mass_tol'])
         # Scale
         if 'masses_path' in kwargs:
             path = os.path.join(kwargs['masses_path'], 'masses.tsv')

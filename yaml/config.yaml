@@ -17,7 +17,7 @@ lr_floor: 5.0e-5
 lr_decay_steps: 975000
 
 # Loading previous weights
-prev_wts: #/cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27 # Load weights from previous run (project path->timestamp)
+prev_wts: #save/2025-04-15_17-02-04 # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
 save_weights: False
