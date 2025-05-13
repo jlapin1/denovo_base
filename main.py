@@ -82,7 +82,8 @@ class BaseDenovo:
             batch_size=config['batch_size'],
             **self.config['loader']
         )
-
+        
+        self.training_loss_keys = []
         self.eval_stats = []
 
     def save_weights(self, fp='./model.wts'):
@@ -435,7 +436,6 @@ class BaseDenovo:
     def on_eval_end(self, *args, **kwargs):
         pass
 
-
 class DenovoArDSObj(BaseDenovo):
     def __init__(self, config, svdir='./dswts/'):
         super().__init__(
@@ -586,7 +586,7 @@ class DenovoDiffusionObj(BaseDenovo):
     def inptarg(self, batch):
         
         bs, sl = batch['intseq'].shape
-        dec_input = deepcopy(batch['intseq'])
+        #dec_input = deepcopy(batch['intseq'])
         target = deepcopy(batch['intseq'])
 
         # Schedule sampler
@@ -669,6 +669,7 @@ class DenovoMDLMObj(BaseDenovo):
             config=config, 
             svdir=svdir
         )
+        self.training_loss_keys.extend(['loss'])
 
         from models.seq2seq import Seq2SeqMDLM
         diff_config = {
@@ -693,7 +694,11 @@ class DenovoMDLMObj(BaseDenovo):
                 'sigma_min': 1e-4,
                 'sigma_max': 20,
             },
+            'model': {
+                'length': 40,
+            }
         }
+        self.max_length = diff_config['model']['length']
         config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
@@ -729,10 +734,63 @@ class DenovoMDLMObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            #self.load_saved_weights(self.opt, "opt", config['load_last'])
-            #U.optimizer_to(self.opt, device)
+            self.load_saved_weights(self.opt, "opt", config['load_last'])
+            U.optimizer_to(self.opt, device)
         
         self.model.to(device)
+
+    def inptarg(self, batch):
+        bs, sl = batch['intseq'].shape
+
+        #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
+        
+        target = deepcopy(batch['intseq'])
+        target = self.model.decoder.append_null_token(target)
+        target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
+        
+        loss_mask = self.model.decoder.sequence_mask(target)
+
+        return target, loss_mask
+
+    def train_step(self, batch):
+        batch = U.Dict2dev(batch, device)
+        target, loss_mask = self.inptarg(batch)
+        
+        self.model.to(device)
+        self.model.train()
+        self.model.zero_grad()
+        
+        embedding = self.model.encoder_embedding(batch)
+        
+        model_kwargs = {
+            #'input_ids': None,
+            #'decoder_input_ids': target,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+            'kv_features': embedding['emb'],
+        }
+
+        backbone = self.model.decoder
+        loss = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
+        
+        nll = loss * loss_mask
+        count = loss_mask.sum()
+        batch_nll = nll.sum()
+        token_nll = batch_nll / count
+        losses = {'loss': token_nll}
+
+        token_nll.backward()
+        self.update_lr()
+        self.opt.step()
+
+        return losses
+    
+    def log_wandb(self, losses, grad_norm):
+        wandb.log({
+            "Total loss": losses['loss'],
+            'Global step': self.global_step,
+            "Global grad norm": grad_norm,
+        })
 
 if __name__ == '__main__':
     

@@ -17,7 +17,7 @@ from torch import Tensor
 #import models
 import models.mdlm.noise_schedule as noise_schedule
 import models.mdlm.ema as ema
-import utils
+import models.mdlm.utils as utils
 
 LOG2 = math.log(2)
 
@@ -852,7 +852,7 @@ class Diffusion(L.LightningModule):
                           dim=-1,
                           index=x0[:, :, None]).squeeze(-1)
 
-  def _forward_pass_diffusion(self, x0):
+  def _forward_pass_diffusion(self, backbone, x0, model_kwargs):
     t = self._sample_t(x0.shape[0], x0.device)
     if self.T > 0:
       t = (t * self.T).to(torch.int)
@@ -868,11 +868,12 @@ class Diffusion(L.LightningModule):
       move_chance = move_chance[:, None]
     else:
       sigma, dsigma = self.noise(t)
-      unet_conditioning = sigma[:, None]
+      #unet_conditioning = sigma[:, None]
       move_chance = 1 - torch.exp(-sigma[:, None])
 
     xt = self.q_xt(x0, move_chance)
-    model_output = self.forward(xt, unet_conditioning)
+    #model_output = self.forward(xt, unet_conditioning)
+    model_output = backbone(xt, **model_kwargs)
     utils.print_nans(model_output, 'model_output')
 
     if self.parameterization == 'sedd':

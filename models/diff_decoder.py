@@ -53,6 +53,7 @@ class base_diffusion_decoder(nn.Module):
         dropout=0,
         alphabet=False,
         prenorm=False,
+        embed_type=None,
         timestep_dimension=128,
         kv_input_dimension=128,
         depth=6,
@@ -129,7 +130,7 @@ class base_diffusion_decoder(nn.Module):
                 ffn_dict, 
                 norm_type='layer', 
                 prenorm=prenorm, 
-                embed_type='preembed',
+                embed_type=embed_type,
                 embed_indim=timestep_dimension,
                 is_cross=True,
                 kvindim=kv_input_dimension,
@@ -153,11 +154,14 @@ class base_diffusion_decoder(nn.Module):
         intseq[eos_inds] = self.EOS
 
         return intseq
+    
+    def AddPosEmbed(self, seq_emb):
+        return seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
 
     def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None):
         
         # Add position to sequence
-        out = seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
+        out = self.AddPosEmbed(seq_emb)
 
         # charge and/or energy embedding
         if self.atleast1:
@@ -177,6 +181,9 @@ class base_diffusion_decoder(nn.Module):
     
     def RemovePrecursorToken(self, inp):
         return inp[:, self.added_tokens :]
+
+    def sequence_mask(self, seq):
+        return seq != self.NT
 
     def Main(self, inp, kv_feats, embed=None, spec_mask=None, seq_mask=None):
         out = inp
@@ -226,6 +233,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
             ffn_multiplier=ffn_multiplier,
             alphabet=alphabet,
             prenorm=prenorm,
+            embed_type='preembed',
             depth=depth,
             timestep_dimension=timestep_dimension,
             kv_input_dimension=dec_config['kv_indim'],
@@ -293,9 +301,6 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
     
     def create_inpdict(self, token_dict):
         self.total_num_tokens = len(self.outdict)
-
-    def sequence_mask(self, seq):
-        return seq != self.NT
 
     def get_embed(self, seq):
         return self.seq_emb(seq)
@@ -422,6 +427,7 @@ class MDLMDecoder(base_diffusion_decoder):
             ffn_multiplier=ffn_multiplier,
             alphabet=alphabet,
             prenorm=prenorm,
+            embed_type=None,
             depth=depth,
             timestep_dimension=timestep_dimension,
             kv_input_dimension=decoder_config['kv_indim'],
@@ -433,8 +439,18 @@ class MDLMDecoder(base_diffusion_decoder):
 
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         x_input_dim = 2*self.predcats if self_condition else self.predcats
-        self.proj_up = nn.Linear(x_input_dim, running_units)
-        self.proj_down = nn.Linear(running_units, self.predcats)
+        self.embed_sequence = nn.Embedding(self.predcats, running_units)
+        self.proj_begin = nn.Sequential(
+            nn.Linear(running_units, running_units),
+            nn.LayerNorm(running_units),
+            nn.ReLU(),
+        )
+        self.proj_end = nn.Sequential(
+            nn.Linear(running_units, running_units),
+            nn.LayerNorm(running_units),
+            nn.ReLU(),
+            nn.Linear(running_units, self.predcats),
+        )
 
     def finish_dict(self, token_dict):
         self.outdict['<SOS>'] = len(self.outdict)
@@ -448,7 +464,26 @@ class MDLMDecoder(base_diffusion_decoder):
         kv_features,
         charge,
         mass,
-        self_conditions,
+        specmask=None,
+        self_conditions=None,
     ):
-        print()
+        # Beginning
+        seq_emb = self.embed_sequence(x)
+        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass) # position added inside
+        emb = self.proj_begin(emb)
+        
+        # Middle
+        out = self.Main(
+            emb, 
+            kv_feats=kv_features,
+            #embed=time_emb,
+            spec_mask=specmask,
+            seq_mask=None,
+        )
+
+        # End
+        out = self.proj_end(out)
+        out = self.RemovePrecursorToken(out)
+
+        return out
 
