@@ -111,9 +111,9 @@ decoder_diff:
     sigma_small: False
     sigma_weight: 1.0 # vlb_weight
     class_cond: False
-    diffusion_steps: 200
+    diffusion_steps: 300
     noise_schedule: mine
-    noise_exponent: 0.2
+    noise_exponent: 0.5
     timestep_respacing: ""
     use_kl: False
     predict_xstart: True # epsilon if False

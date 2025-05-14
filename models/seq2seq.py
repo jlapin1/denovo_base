@@ -223,19 +223,14 @@ class Seq2SeqMDLM(Seq2Seq):
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
         self.decoder = MDLMDecoder(
-            #input_output_units = diff_config['in_channel'],
-            #clip_denoised      = diff_config['clip_denoised'],
-            #output_sigma       = diff_config['learn_sigma'],
             token_dict          = token_dict,
             decoder_config      = decoder_config,
-            #diff_obj           = self.diff_obj,
             **decoder_config,
         )
         # Diffusion object
-        self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict)
+        self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict, self.decoder)
+        self.decoder.diff_obj = self.diff_obj
 
-        #self.ens_size = ensemble_config['ensemble_n']
-        #self.mass_tol = eval(ensemble_config['mass_tol'])
         # Scale
         if 'masses_path' in kwargs:
             path = os.path.join(kwargs['masses_path'], 'masses.tsv')
@@ -246,4 +241,14 @@ class Seq2SeqMDLM(Seq2Seq):
             }
             self.int2mass = {Int: self.str2mass.get(string, 0) for string, Int in self.decoder.outdict.items()}
             self.masses = th.tensor([m[1] for m in sorted(self.int2mass.items())])
+    
+    def forward(self, batch, **kwargs):
+        embedding = self.encoder_embedding(batch)
+        final, logits = self.decoder.predict_sequence(embedding, batch)
+        return final, logits
+
+    def predict_sequence(self, batch):
+        batch_size, SL = batch['mz'].shape
+
+        final, logits = self(batch)
 

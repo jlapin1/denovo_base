@@ -85,6 +85,7 @@ class BaseDenovo:
         
         self.training_loss_keys = []
         self.eval_stats = []
+        self.eval_kwargs = {}
 
     def save_weights(self, fp='./model.wts'):
         th.save(self.model.state_dict(), fp)
@@ -679,6 +680,11 @@ class DenovoMDLMObj(BaseDenovo):
             'time_conditioning': False,
             'sampling': {
                 'predictor': 'ddpm_cache',
+                'steps': 128,
+                'noise_removal': True,
+                'semi_ar': False,
+                'stride_length': 1,
+                'num_strides': 1,
             },
             'eval': {
             },
@@ -750,7 +756,7 @@ class DenovoMDLMObj(BaseDenovo):
         
         loss_mask = self.model.decoder.sequence_mask(target)
 
-        return target, loss_mask
+        return None, target, loss_mask
 
     def train_step(self, batch):
         batch = U.Dict2dev(batch, device)
@@ -894,7 +900,7 @@ if __name__ == '__main__':
         print("\n", out)
     else:
         print("Test validation", end='')
-        #out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-        #assert D.config['high_score'] in out.keys()
+        out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])

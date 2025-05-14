@@ -199,7 +199,6 @@ class base_diffusion_decoder(nn.Module):
         
         return out
 
-
 class DenovoDiffusionDecoder(base_diffusion_decoder):
     def __init__(self,
         token_dict,
@@ -436,7 +435,15 @@ class MDLMDecoder(base_diffusion_decoder):
             precursor_dimension=precursor_dimension,
         )
         self.finish_dict(token_dict)
+        self.timestep_dimension = timestep_dimension
 
+        # Timestep embedding
+        self.time_embed = nn.Sequential(
+            nn.Linear(timestep_dimension, timestep_dimension),
+            nn.SiLU(),
+            nn.Linear(timestep_dimension, timestep_dimension),
+        )
+        
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         x_input_dim = 2*self.predcats if self_condition else self.predcats
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
@@ -461,12 +468,16 @@ class MDLMDecoder(base_diffusion_decoder):
 
     def forward(self,
         x,
+        timesteps,
         kv_features,
         charge,
         mass,
         specmask=None,
         self_conditions=None,
     ):
+        # Timestep
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 2, self.timestep_dimension))
+
         # Beginning
         seq_emb = self.embed_sequence(x)
         emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass) # position added inside
@@ -476,7 +487,7 @@ class MDLMDecoder(base_diffusion_decoder):
         out = self.Main(
             emb, 
             kv_feats=kv_features,
-            #embed=time_emb,
+            embed=time_emb,
             spec_mask=specmask,
             seq_mask=None,
         )
@@ -486,4 +497,12 @@ class MDLMDecoder(base_diffusion_decoder):
         out = self.RemovePrecursorToken(out)
 
         return out
-
+    
+    def predict_sequence(self, embedding, batch):
+        model_kwargs = {
+            'kv_features': embedding,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+        }
+        out = self.diff_obj._sample(model_kwargs=model_kwargs)
+        print()
