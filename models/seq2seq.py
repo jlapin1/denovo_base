@@ -243,12 +243,14 @@ class Seq2SeqMDLM(Seq2Seq):
             self.masses = th.tensor([m[1] for m in sorted(self.int2mass.items())])
     
     def forward(self, batch, **kwargs):
-        embedding = self.encoder_embedding(batch)
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        spectrum_mask = dictionary['mask']
         final, logits = self.decoder.predict_sequence(embedding, batch)
         return final, logits
 
     def predict_sequence(self, batch):
         batch_size, SL = batch['mz'].shape
-
         final, logits = self(batch)
+        return final, logits
 

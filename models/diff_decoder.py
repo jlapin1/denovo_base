@@ -504,5 +504,5 @@ class MDLMDecoder(base_diffusion_decoder):
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
         }
-        out = self.diff_obj._sample(model_kwargs=model_kwargs)
-        print()
+        out, logits = self.diff_obj._sample(model_kwargs=model_kwargs)
+        return out, logits

@@ -701,7 +701,7 @@ class DenovoMDLMObj(BaseDenovo):
                 'sigma_max': 20,
             },
             'model': {
-                'length': 40,
+                'length': 40+1,
             }
         }
         self.max_length = diff_config['model']['length']
@@ -760,7 +760,7 @@ class DenovoMDLMObj(BaseDenovo):
 
     def train_step(self, batch):
         batch = U.Dict2dev(batch, device)
-        target, loss_mask = self.inptarg(batch)
+        _, target, loss_mask = self.inptarg(batch)
         
         self.model.to(device)
         self.model.train()

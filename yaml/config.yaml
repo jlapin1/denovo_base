@@ -17,10 +17,10 @@ lr_floor: 5.0e-5
 lr_decay_steps: 975000
 
 # Loading previous weights
-prev_wts: #save/2025-04-15_17-02-04 # Load weights from previous run (project path->timestamp)
+prev_wts: #save/2025-05-20_11-54-42 # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 # Logging
 log_wandb: False
@@ -111,9 +111,9 @@ decoder_diff:
     sigma_small: False
     sigma_weight: 1.0 # vlb_weight
     class_cond: False
-    diffusion_steps: 300
+    diffusion_steps: 200
     noise_schedule: mine
-    noise_exponent: 0.5
+    noise_exponent: 0.2
     timestep_respacing: ""
     use_kl: False
     predict_xstart: True # epsilon if False

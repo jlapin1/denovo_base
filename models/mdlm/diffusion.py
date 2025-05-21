@@ -19,7 +19,7 @@ import models.mdlm.noise_schedule as noise_schedule
 import models.mdlm.ema as ema
 import models.mdlm.utils as utils
 
-device = torch.device('gpu' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 LOG2 = math.log(2)
 
@@ -322,16 +322,21 @@ class Diffusion:#(L.LightningModule):
     assert sigma.ndim == 1, sigma.shape
     return sigma
 
-  def forward(self, x, sigma, model_kwargs={}):
+  def forward(self, x, sigma, model_kwargs={}, return_logits=False):
     """Returns log score."""
     sigma = self._process_sigma(sigma)
     model_kwargs['timesteps'] = sigma
-    with torch.cuda.amp.autocast(dtype=torch.float32):
+    with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float32):
       logits = self.backbone(x, **model_kwargs)
     
     if self.parameterization == 'subs':
-      return self._subs_parameterization(logits=logits,
+      out = self._subs_parameterization(logits=logits,
                                          xt=x)
+      if return_logits:
+          return out, logits
+      else:
+          return out
+
     elif self.parameterization == 'sedd':
       return self._sedd_parameterization(logits=logits,
                                          xt=x,
@@ -687,6 +692,7 @@ class Diffusion:#(L.LightningModule):
     for i in range(num_steps):
       t = timesteps[i] * torch.ones(
         x.shape[0], 1, device=self.device)
+      model_kwargs['timesteps'] = t
       if self.sampler == 'ddpm':
         x = self._ddpm_update(x, t, dt, model_kwargs)
       elif self.sampler == 'ddpm_cache':
@@ -707,8 +713,10 @@ class Diffusion:#(L.LightningModule):
         x = self._denoiser_update(x, t, model_kwargs)
       else:
         sigma_t = self.noise(t)[0]
-        x = self.forward(x, sigma_t, model_kwargs).argmax(dim=-1)
-    return x
+        x, logits = self.forward(x, sigma_t, model_kwargs, return_logits=True)
+        x = x.argmax(dim=-1)
+    
+    return x, logits
 
   def restore_model_and_sample(self, num_steps, eps=1e-5):
     """Generate samples from the model."""
@@ -873,7 +881,7 @@ class Diffusion:#(L.LightningModule):
       move_chance = move_chance[:, None]
     else:
       sigma, dsigma = self.noise(t)
-      model_kwargs['timesteps'] = sigma[:, None]
+      model_kwargs['timesteps'] = sigma if self.time_conditioning else torch.zeros_like(sigma)
       move_chance = 1 - torch.exp(-sigma[:, None])
 
     xt = self.q_xt(x0, move_chance)
