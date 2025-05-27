@@ -887,7 +887,8 @@ class Diffusion:#(L.LightningModule):
     xt = self.q_xt(x0, move_chance)
     model_output = backbone(xt, **model_kwargs)
     utils.print_nans(model_output, 'model_output')
-
+    return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index
+    
     if self.parameterization == 'sedd':
       return dsigma[:, None] * self._score_entropy(
         model_output, sigma[:, None], xt, x0)
