@@ -679,7 +679,7 @@ class DenovoMDLMObj(BaseDenovo):
             'parameterization': 'subs',
             'time_conditioning': False,
             'sampling': {
-                'predictor': 'ddpm_cache',
+                'predictor': 'ddpm',
                 'steps': 128,
                 'noise_removal': True,
                 'semi_ar': False,
@@ -696,9 +696,10 @@ class DenovoMDLMObj(BaseDenovo):
                 'change_of_variables': False,
             },
             'noise': {
-                'type': 'loglinear',
+                'type': 'custom',
                 'sigma_min': 1e-4,
                 'sigma_max': 20,
+                'exponent': 0.5,
             },
             'model': {
                 'length': 40+1,
@@ -902,7 +903,7 @@ if __name__ == '__main__':
         print("\n", out)
     else:
         print("Test validation", end='')
-        #out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-        #assert D.config['high_score'] in out.keys()
+        out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])

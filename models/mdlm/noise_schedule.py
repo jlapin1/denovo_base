@@ -24,6 +24,8 @@ def get_noise(config, dtype=torch.float32):
     return Linear(config['noise']['sigma_min'],
                   config['noise']['sigma_max'],
                   dtype)
+  elif config['noise']['type'] == 'custom':
+      return CustomNoise(exponent=config['noise']['exponent'])
   else:
     raise ValueError(f'{config.noise.type} is not a valid noise')
 
@@ -149,3 +151,16 @@ class LogLinearNoise(Noise):
     sigma_t = - torch.log1p(- torch.exp(t * f_T + (1 - t) * f_0))
     t = - torch.expm1(- sigma_t) / (1 - self.eps)
     return t
+
+class CustomNoise(Noise):
+    def __init__(self, eps=1e-3, exponent=0.5):
+        super().__init__()
+        self.eps = eps
+        self.exponent = exponent
+    
+    def rate_noise(self, t):
+        return self.exponent*(1-self.eps) / ((1-(1-self.eps)*t**self.exponent)*(t**self.exponent))
+
+    def total_noise(self, t):
+        return -torch.log(1 - (1-self.eps) * t ** self.exponent)
+

@@ -13,17 +13,17 @@ lr_warmup_steps: 20000
 # Phase 2 - Flat
 lr_flat_steps: 266000
 # Phase 3 - Decay
-lr_floor: 1.0e-4
+lr_floor: 5.0e-5
 lr_decay_steps: 975000
 
 # Loading previous weights
 prev_wts: #save/2025-05-20_11-54-42 # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
