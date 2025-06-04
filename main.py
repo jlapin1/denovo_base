@@ -677,9 +677,9 @@ class DenovoMDLMObj(BaseDenovo):
             'T': 0,
             'subs_masking': False,
             'parameterization': 'subs',
-            'time_conditioning': False,
+            'time_conditioning': True,
             'sampling': {
-                'predictor': 'ddpm',
+                'predictor': 'ddpm_cache',
                 'steps': 128,
                 'noise_removal': True,
                 'semi_ar': False,
@@ -696,10 +696,10 @@ class DenovoMDLMObj(BaseDenovo):
                 'change_of_variables': False,
             },
             'noise': {
-                'type': 'custom',
+                'type': 'loglinear',
                 'sigma_min': 1e-4,
                 'sigma_max': 20,
-                'exponent': 0.5,
+                'exponent': 1.5,
             },
             'model': {
                 'length': 40+1,

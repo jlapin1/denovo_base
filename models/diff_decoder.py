@@ -476,7 +476,7 @@ class MDLMDecoder(base_diffusion_decoder):
         self_conditions=None,
     ):
         # Timestep
-        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 2, self.timestep_dimension))
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
 
         # Beginning
         seq_emb = self.embed_sequence(x)
