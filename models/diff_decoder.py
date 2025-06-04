@@ -89,7 +89,7 @@ class DenovoDiffusionDecoder(nn.Module):
         self.input_output_units = input_output_units
         self.use_mass = dec_config['use_mass']
         self.use_charge = dec_config['use_charge']
-        self.max_sl = dec_config['sequence_length'] + 1
+        self.max_sl = dec_config['sequence_length'] # + 1
         self.final_down_proj = nn.Linear(RU, input_output_units)
         self.output_sigma = output_sigma
         if output_sigma:
@@ -295,7 +295,7 @@ class DenovoDiffusionDecoder(nn.Module):
     def predict_sequence(self, embedding, batch, save_xcur=False, cond_fn=None):
         shape = (
             embedding['emb'].shape[0],
-            batch['intseq'].shape[1] + 1,
+            self.max_sl,
             self.input_output_units,
         )
         model_kwargs = {

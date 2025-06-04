@@ -535,6 +535,7 @@ class DenovoDiffusionObj(BaseDenovo):
         config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
+        config['decoder_diff']['model_config']['sequence_length'] = self.config['pep_length'][1] + 1
         self.diff_config = config['decoder_diff']['diffusion_config']
 
         from models.seq2seq import Seq2SeqDiff
