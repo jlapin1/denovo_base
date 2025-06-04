@@ -1,4 +1,4 @@
-eval_only: False
+eval_only: True
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
