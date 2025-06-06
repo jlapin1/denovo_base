@@ -156,7 +156,7 @@ decoder_diff:
     clamp_denoised: False
   # ensemble prediction
   ensemble:
-    ensemble_n: 10
+    ensemble_n: 1
     mass_tol: 1e-2
 
 # Leaving ckpt empty deactivate classifier guided diffusion

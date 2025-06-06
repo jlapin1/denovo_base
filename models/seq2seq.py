@@ -154,12 +154,18 @@ class Seq2SeqDiff(Seq2Seq):
         batch['peplen'] = batch['peplen'][:,None].tile(1, n).reshape(-1)
         return batch
 
-    def forward(self, batch, save_xcur=False, cond_fn=None):
+    def forward(self, batch, save_xcur=False, save_xstart=False, cond_fn=None):
         embedding = self.encoder_embedding(batch)
-        final, logits = self.decoder.predict_sequence(embedding, batch, save_xcur=save_xcur, cond_fn=cond_fn)
+        final, logits = self.decoder.predict_sequence(
+            embedding, 
+            batch, 
+            save_xcur=save_xcur, 
+            save_xstart=save_xstart, 
+            cond_fn=cond_fn
+        )
         return final, logits
 
-    def predict_sequence(self, batch, save_xcur=False, n=None, cls_dict=None):
+    def predict_sequence(self, batch, save_xcur=False, save_xstart=False, n=None, cls_dict=None):
         bs, sl = batch['mz'].shape
         n = self.ens_size if n==None else n
         cond_fn = (
@@ -169,7 +175,7 @@ class Seq2SeqDiff(Seq2Seq):
 
         full_size = bs*n
         batch = self.expand_batch(batch, n=n)
-        seqs, logits = self(batch, save_xcur=save_xcur, cond_fn=cond_fn)
+        seqs, logits = self(batch, save_xcur=save_xcur, save_xstart=save_xstart, cond_fn=cond_fn)
         #uniqs, inds, counts = seqs.unique(dim=0, return_inverse=True, return_counts=True)
         
         seqs_rs = seqs.reshape(bs, n, -1)

@@ -292,7 +292,7 @@ class DenovoDiffusionDecoder(nn.Module):
             out_dict['var'] = logvar_fraction
         return out_dict
 
-    def predict_sequence(self, embedding, batch, save_xcur=False, cond_fn=None):
+    def predict_sequence(self, embedding, batch, save_xcur=False, save_xstart=False, cond_fn=None):
         shape = (
             embedding['emb'].shape[0],
             self.max_sl,
@@ -331,6 +331,7 @@ class DenovoDiffusionDecoder(nn.Module):
             clip_denoised=self.clip_denoised,
             model_kwargs=model_kwargs,
             save_xcur=save_xcur,
+            save_xstart=save_xstart,
             cond_fn=cond_fn,
         )
         logits = self.get_logits(units) # bs, 31, predcats
