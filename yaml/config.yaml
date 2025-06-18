@@ -1,4 +1,4 @@
-eval_only: True
+eval_only: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
@@ -17,13 +17,13 @@ lr_floor: 5.0e-5
 lr_decay_steps: 975000
 
 # Loading previous weights
-prev_wts: /cmnfs/home/j.lapin/projects/denovo_base/save/2025-06-06_12-18-20 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -36,7 +36,7 @@ loader:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
   buffer_size: 10000
-  num_workers: 9
+  num_workers: 0
   val_steps: 100
   remove_columns:
     - 'evidence_index'

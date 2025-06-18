@@ -7,52 +7,53 @@ import re
 from glob import glob
 import sys
 import pandas as pd
+import numpy as np
 
 def map_fn(example, tokenizer, dic=None, top=100, max_seq=50):
-    ab = th.tensor(example['intensity_array'])
+    ab = example['intensity_array']
     ab_sort = (-ab).argsort()[:top]
     ab = ab[ab_sort]
     ab /= ab.max()
     spectrum_length = len(ab)
-    mz = th.tensor(example['mz_array'])[ab_sort]
+    mz = example['mz_array'][ab_sort]
     mz_sort = mz.argsort()
     length = len(mz)
-    mz_ = th.zeros(top)
+    mz_ = np.zeros(top)
     mz_[:len(mz_sort)] = mz[mz_sort]
-    ab_ = th.zeros(top)
+    ab_ = np.zeros(top)
     ab_[:len(ab_sort)] = ab[mz_sort]
     example['mz_array'] = mz_
     example['intensity_array'] = ab_
-    example['precursor_charge'] = th.tensor(example['precursor_charge'], dtype=th.int32)
-    example['precursor_mass'] = th.tensor(example['precursor_mass'], dtype=th.float32)
-    example['spectrum_length'] = th.tensor(len(example['mz_array']), dtype=th.int32)
+    example['precursor_charge'] = example['precursor_charge']
+    example['precursor_mass'] = example['precursor_mass']
+    example['spectrum_length'] = len(example['mz_array'])
     tokenized_sequence = tokenizer(example['modified_sequence'])
     peptide_length = len(tokenized_sequence)
-    example['tokenized_sequence'] = th.tensor([dic[m] for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=th.int32)
-    example['peptide_length'] = th.tensor(peptide_length, dtype=th.int32)
-    example['spectrum_length'] = th.tensor(spectrum_length, dtype=th.int32)
+    example['tokenized_sequence'] = np.array([dic[m] for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
+    example['peptide_length'] = peptide_length
+    example['spectrum_length'] = spectrum_length
 
     return example
 
 def collate_fn(batch_list):
     species = [m['experiment_name'] for m in batch_list]
-    speclen = th.stack([m['spectrum_length'] for m in batch_list])
-    mz = th.stack([m['mz_array'][:speclen.max()] for m in batch_list])
-    ab = th.stack([m['intensity_array'][:speclen.max()] for m in batch_list])
-    charge = th.stack([m['precursor_charge'] for m in batch_list])
-    mass = th.stack([m['precursor_mass'] for m in batch_list])
-    peplen = th.stack([m['peptide_length'] for m in batch_list])
-    intseq = th.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
+    speclen = np.stack([m['spectrum_length'] for m in batch_list])
+    mz = np.stack([m['mz_array'][:speclen.max()] for m in batch_list])
+    ab = np.stack([m['intensity_array'][:speclen.max()] for m in batch_list])
+    charge = np.stack([m['precursor_charge'] for m in batch_list])
+    mass = np.stack([m['precursor_mass'] for m in batch_list])
+    peplen = np.stack([m['peptide_length'] for m in batch_list])
+    intseq = np.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
 
     out = {
         'experiment_name': species,
-        'mz': mz,
-        'ab': ab,
-        'charge': charge,
-        'mass': mass,
-        'length': speclen,
-        'intseq': intseq,
-        'peplen': peplen,
+        'mz': th.tensor(mz, dtype=th.float32),
+        'ab': th.tensor(ab, dtype=th.float32),
+        'charge': th.tensor(charge, dtype=th.int32),
+        'mass': th.tensor(mass, dtype=th.float32),
+        'length': th.tensor(speclen, dtype=th.int32),
+        'intseq': th.tensor(intseq, dtype=th.int32),
+        'peplen': th.tensor(peplen, dtype=th.int32),
         #'spectrum_lengths': speclen[:,None],
     }
 
@@ -210,12 +211,12 @@ class LoaderHF(LoaderObj):
             'parquet',
             data_files={'train': data_files['train']},
             streaming=True
-        )
+        ).with_format('numpy')
         dataset_val = load_dataset(
             'parquet',
             data_files={'val': data_files['val']},
             streaming=True,
-        )
+        ).with_format('numpy')
         dataset['val'] = dataset_val['val']
 
         # Map to format outputs
