@@ -115,7 +115,7 @@ class Seq2SeqDiff(Seq2Seq):
         decoder_config['kv_indim'] = self.encoder.run_units
         self.diff_obj = create_diffusion(**diff_config)
         self.decoder = DenovoDiffusionDecoder(
-            input_output_units = diff_config['in_channel'],
+            input_output_units = diff_config['in_channel'], # perhaps replace this with running units
             clip_denoised      = diff_config['clip_denoised'],
             output_sigma       = diff_config['learn_sigma'],
             token_dict         = token_dict,

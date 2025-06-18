@@ -90,7 +90,11 @@ class DenovoDiffusionDecoder(nn.Module):
         self.use_mass = dec_config['use_mass']
         self.use_charge = dec_config['use_charge']
         self.max_sl = dec_config['sequence_length'] # + 1
-        self.final_down_proj = nn.Linear(RU, input_output_units)
+        self.final_down_proj = nn.Sequential(
+            nn.Linear(RU, RU),
+            nn.ReLU(),
+            nn.Linear(RU, input_output_units)
+        )
         self.output_sigma = output_sigma
         if output_sigma:
             self.sigma_down_proj = nn.Sequential(
@@ -307,21 +311,6 @@ class DenovoDiffusionDecoder(nn.Module):
         # Create fully noised real data
         device = model_kwargs['kv_feats'].device
         noise = th.randn(*shape, device=device)
-        
-        """target = self.append_null_token(batch['intseq'])
-        target = self.replace_with_eos_token(target, batch['peplen'])
-        loss_mask = self.sequence_mask(target)
-        model_kwargs['loss_mask'] = loss_mask
-        x_start_mean = self.get_embed(target)
-        std = _extract_into_tensor(
-            self.diff_obj.sqrt_one_minus_alphas_cumprod,
-            th.tensor([0]).to(x_start_mean.device),
-            x_start_mean.shape,
-        )
-        x_start = self.diff_obj.get_x_start(x_start_mean, std)
-        ts = th.tensor(x_start.shape[0]*[self.diff_obj.num_timesteps-1]).to(x_start.device)
-        #ts = th.tensor(x_start.shape[0]*[2000-1]).to(x_start.device)
-        noise = self.diff_obj.q_sample(x_start, ts, noise=noise)"""
 
         units = self.diff_obj.my_p_sample_loop(
             self,

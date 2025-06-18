@@ -291,8 +291,11 @@ class Scale:
     
     def intseq2mass(self, intseq):
         sumdim = 0 if len(intseq.shape) == 1 else 1
+        gatherdim = sumdim
         masses = self.mp.to(intseq.device)
-        return th.gather(masses, 0, intseq).sum(sumdim)
+        if len(intseq.shape) > 1:
+            masses = masses[None].tile([intseq.shape[0], 1])
+        return th.gather(masses, gatherdim, intseq.type(th.int64)).sum(sumdim)
 
     def modseq2mass(self, modified_sequence):
         return np.sum(

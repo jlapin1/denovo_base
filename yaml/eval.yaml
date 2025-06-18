@@ -1,9 +1,9 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
   set: test
-  max_batches: 100
+  max_batches:
   save: True
-  outpath: ./output8_.parquet
+  outpath: ./output.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing
