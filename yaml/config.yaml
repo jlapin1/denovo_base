@@ -36,7 +36,7 @@ loader:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
   buffer_size: 10000
-  num_workers: 0
+  num_workers: 9
   val_steps: 100
   remove_columns:
     - 'evidence_index'
