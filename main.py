@@ -688,6 +688,7 @@ if __name__ == '__main__':
         for key in [
             'epochs', 'prev_wts', 'load_last', 'lr_schedule',
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
+            'lr_flat_steps', 'lr_floor', 'lr_decay_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
             'top_peaks', 'classifier_config',
         ]:

@@ -296,7 +296,7 @@ class DenovoDiffusionDecoder(nn.Module):
             out_dict['var'] = logvar_fraction
         return out_dict
 
-    def predict_sequence(self, embedding, batch, save_xcur=False, save_xstart=False, cond_fn=None):
+    def predict_sequence(self, embedding, batch, save_xcur=False, save_xstart=False, cond_fn=None, progress=False):
         shape = (
             embedding['emb'].shape[0],
             self.max_sl,
@@ -312,7 +312,7 @@ class DenovoDiffusionDecoder(nn.Module):
         device = model_kwargs['kv_feats'].device
         noise = th.randn(*shape, device=device)
 
-        units = self.diff_obj.my_p_sample_loop(
+        output = self.diff_obj.my_p_sample_loop(
             self,
             shape,
             noise=noise,
@@ -322,11 +322,18 @@ class DenovoDiffusionDecoder(nn.Module):
             save_xcur=save_xcur,
             save_xstart=save_xstart,
             cond_fn=cond_fn,
+            progress=progress,
         )
-        logits = self.get_logits(units) # bs, 31, predcats
+        logits = self.get_logits(output['final']) # bs, sl, predcats
         final = logits.argmax(dim=-1)
         
-        return final, logits
+        return_ = final, logits
+        if save_xcur: 
+            return_ = return_ + (output['xcur_save'],)
+        if save_xstart: 
+            return_ = return_ + (output['xstart_save'],)
+
+        return return_
 
     def clamp(self, x_0, *args):
         embedding = self.lm_head.weight # 24, 512
