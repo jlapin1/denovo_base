@@ -19,6 +19,7 @@ lr_decay_steps: 14150*5
 # Loading previous weights
 prev_wts: /cmnfs/proj/diffusion/experiments/2025-06-06_12-18-20 # Load weights from previous run (project path->timestamp)
 load_last: False
+new_exp: True # continue using old directory or create new one
 # Saving weights
 save_weights: True
 high_score: aa_recall

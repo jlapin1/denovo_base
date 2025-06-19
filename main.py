@@ -28,7 +28,7 @@ choice = np.random.choice
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
 class BaseDenovo:
-    def __init__(self, config, svdir='./downstream/'):
+    def __init__(self, config, svdir='./downstream/', rddir=None):
         
         # Config is entire downstream yaml
         self.config = config
@@ -42,6 +42,7 @@ class BaseDenovo:
             if not os.path.exists(os.path.join(svdir, 'weights')):
                 os.mkdir(os.path.join(svdir, 'weights'))
         self.svdir = svdir
+        self.rddir = rddir
         self.config['sl'] = self.config['pep_length'][1]
         
         self.phase_counter = [0, 0, 0]
@@ -91,7 +92,7 @@ class BaseDenovo:
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
         print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
-        possible_weights_path = glob(os.path.join(self.svdir, "weights", regex))
+        possible_weights_path = glob(os.path.join(self.rddir, "weights", regex))
         
         # Found something
         if len(possible_weights_path) > 0:
@@ -437,10 +438,11 @@ class BaseDenovo:
 
 
 class DenovoArDSObj(BaseDenovo):
-    def __init__(self, config, svdir='./dswts/'):
+    def __init__(self, config, svdir='./dswts/', rddir=None):
         super().__init__(
             config=config,
-            svdir=svdir
+            svdir=svdir,
+            rddir=rddir,
         )
         self.training_loss_keys = ['loss']
         self.eval_kwargs = {}
@@ -521,10 +523,11 @@ class DenovoArDSObj(BaseDenovo):
         })
 
 class DenovoDiffusionObj(BaseDenovo):
-    def __init__(self, config, diff_config=None, svdir='./dswts/'):
+    def __init__(self, config, diff_config=None, svdir='./dswts/', rddir=None):
         super().__init__(
             config=config, 
-            svdir=svdir
+            svdir=svdir,
+            rddir=rddir,
         )
         self.training_loss_keys = ['loss', 'mse', 'decoder_nll', 'tT']
         self.eval_kwargs = {'n': 1}
@@ -680,8 +683,15 @@ if __name__ == '__main__':
     ########################################################
 
     # Continuing previous downstream run
+    timestamp = U.timestamp()
     if config['prev_wts'] is not None:
-        svdir = os.path.join(config['prev_wts'])
+        rddir = os.path.join(config['prev_wts'])
+        if config['new_exp']:
+            svdir = os.path.join('save', timestamp)
+            U.create_experiment(svdir, svwts=config['save_weights'])
+            print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+        else:
+            svdir = os.path.join(config['prev_wts'])
         with open(os.path.join(config['prev_wts'], "yaml", "config.yaml")) as stream:
             config = yaml.safe_load(stream)
         # Replace previous settings with new ones
@@ -690,27 +700,28 @@ if __name__ == '__main__':
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'lr_flat_steps', 'lr_floor', 'lr_decay_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
-            'top_peaks', 'classifier_config',
+            'top_peaks', 'classifier_config', 'new_exp',
         ]:
             config[key] = config_[key]
         timestamp = config['prev_wts']
     # Create new experiment
     elif config['save_weights']:
-        timestamp = U.timestamp()
+        rddir = None
         svdir = os.path.join('save', timestamp)
         U.create_experiment(svdir, svwts=config['save_weights'])
         print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
     else:
+        rddir = None
         svdir = './'
         
     # Downstream object
     print("<DSCOMMENT> Denovo sequencing")
     if 'diff' in config['decoder_name']:
         print("<DSCOMMENT> Using diffusion decoder")
-        D = DenovoDiffusionObj(config, svdir=svdir)
+        D = DenovoDiffusionObj(config, svdir=svdir, rddir=rddir)
     else:
         print("<DSCOMMENT> Using autoregressive decoder")
-        D = DenovoArDSObj(config, svdir=svdir)
+        D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)
 
     # WandB
     if config['log_wandb'] and (config['eval_only'] == False):
