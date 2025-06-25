@@ -99,7 +99,7 @@ class LoaderObj:
         # - RULES
         #   1. There is a file named enumerate_tokens.py with a subroutine named
         #      partition_modified_sequence
-        sys.path.append(tokenizer_path)
+        sys.path.insert(0, tokenizer_path)
         from enumerate_tokens import partition_modified_sequence
         tokenizer = partition_modified_sequence
 
@@ -250,9 +250,10 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file named enumerate_tokens.py with a subroutine named
         #      partition_modified_sequence
-        sys.path.append(tokenizer_path)
-        from enumerate_tokens import partition_modified_sequence
-        self.tokenizer = partition_modified_sequence
+        self.tokenizer = self.create_tokenizer(tokenizer_path)
+        #sys.path.append(tokenizer_path)
+        #from enumerate_tokens import partition_modified_sequence
+        #self.tokenizer = partition_modified_sequence
 
         # Filter for length
         if 'pep_length' in kwargs.keys():
