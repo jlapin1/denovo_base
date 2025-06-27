@@ -70,6 +70,7 @@ class BaseDenovo:
         
         self.running_loss = []
         self.global_step = 0
+        self.save_last_counter = 0
 
         # Dataloader
         if 'val_steps' in self.config['loader'].keys(): # backwards compatibility
@@ -89,6 +90,13 @@ class BaseDenovo:
     def save_weights(self, fp='./model.wts'):
         th.save(self.model.state_dict(), fp)
     
+    def save_last(self, override=False):
+        ready = self.global_step - self.save_last_counter >= self.config['save_last_freq']
+        if ready or override:
+            self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
+            U.save_optimizer_state(self.opt, os.path.join(self.svdir, 'weights/opt_last.wts'))
+            self.save_last_counter = self.global_step
+
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
         print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
@@ -167,27 +175,26 @@ class BaseDenovo:
             step_start = time()
             
             if self.config['log_wandb']: wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
-
+            
             losses = self.train_step(batch)
             self.global_step += 1
             
             if self.config['log_wandb']:
                 loss_printout = 'Loss: %7f'%losses['loss']
+                global_grad_norm = U.global_grad_norm(self.model)
+                self.log_wandb(losses, global_grad_norm)
             else:
                 for key in running_loss.keys(): running_loss[key].append(losses[key].detach().cpu())
                 rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
                 loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
             pbar.set_description(f"Loss: {loss_printout}")
-
-            if self.config['log_wandb']:
-                global_grad_norm = U.global_grad_norm(self.model)
-                self.log_wandb(losses, global_grad_norm)
-                
-
+            
             self.running_loss.append(losses['loss'].detach().cpu())
             if self.log and (self.global_step % svfreq == 0):
                 self.savetxt(self.running_loss)
                 self.running_loss = []
+            if self.config['save_weights']:
+                self.save_last()
 
             step_end = time()
             
@@ -411,8 +418,7 @@ class BaseDenovo:
             
             # Saving the checkpoint
             if self.config['save_weights']:
-                self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
-                U.save_optimizer_state(self.opt, os.path.join(self.svdir, 'weights/opt_last.wts'))
+                self.save_last(override=True)
                 if highscore == out[self.config['high_score']]:
                     ext = f"epoch{i}_high_{highscore:.3f}"
                     wtsdir = os.path.join(self.svdir, "weights")

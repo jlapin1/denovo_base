@@ -8,52 +8,53 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 1.5e-4 # phase 2 LR
+lr_warmup_end: 3.0e-4 # phase 2 LR
 lr_warmup_steps: 20000
 # Phase 2 - Flat
-lr_flat_steps: 266000
+lr_flat_steps: 0
 # Phase 3 - Decay
-lr_floor: 5.0e-5
-lr_decay_steps: 975000
+lr_floor: 1.0e-4
+lr_decay_steps: 675000
 
 # Loading previous weights
 prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
+save_last_freq: 10000
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
 # Loader options
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
-  val_name: saccharomyces_cerevisiae
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  val_name: val
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
-  buffer_size: 10000
-  num_workers: 9
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/masses.tsv
+  buffer_size: 1000
+  num_workers: 4
   val_steps: 100
   remove_columns:
-    - 'evidence_index'
+    #- 'evidence_index'
     - 'scan_number'
     - 'sequence'
     - 'precursor_mz'
     - 'retention_time'
-    - 'title'
-    - 'scans'
+    #- 'title'
+    #- 'scans'
   scratch:
     use: False
     path: /media/storage/scratch/ninespecies/
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *
+decoder_name: ar # *diff* | *
 
 # Encoder model
 
