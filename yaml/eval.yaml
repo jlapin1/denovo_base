@@ -1,5 +1,7 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
+  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1 # None: use config.yaml setting, else: override
+  eval_name: saccharomyces_cerevisiae
   set: test
   max_batches:
   save: True

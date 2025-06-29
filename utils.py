@@ -277,9 +277,10 @@ class Scale:
         self.amod_dict = amod_dict
         int2mass = np.zeros((len(amod_dict)))
         for aa, integer in amod_dict.items():
-            if len(aa.split('_')) == 2:
-                aa, modwt = aa.split('_')
-                int2mass[integer] = masses[aa] + eval(modwt)
+            split = re.split('[+\-_]', aa)
+            if len(split) == 2:
+                aa, modwt = split
+                int2mass[integer] = masses.get(aa,0) + eval(modwt)
             else:
                 if aa in masses.keys():
                     int2mass[integer] = masses[aa]

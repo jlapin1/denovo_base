@@ -13,13 +13,13 @@ lr_warmup_steps: 20000
 # Phase 2 - Flat
 lr_flat_steps: 0
 # Phase 3 - Decay
-lr_floor: 1.0e-4
-lr_decay_steps: 675000
+lr_floor: 5.0e-5
+lr_decay_steps: 975000
 
 # Loading previous weights
-prev_wts: # Load weights from previous run (project path->timestamp)
-load_last: False
-new_exp: True # continue using old directory or create new one
+prev_wts: /cmnfs/home/j.lapin/projects/denovo_base/save/2025-06-25_19-14-06 # Load weights from previous run (project path->timestamp)
+load_last: True
+new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
 save_weights: True
 high_score: aa_recall
@@ -32,13 +32,13 @@ wandb_project: diffusion
 # Loader options
 loader:
   train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  train_name:
+  train_name: train
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   val_name: val
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/masses.tsv
   buffer_size: 1000
-  num_workers: 4
+  num_workers: 2
   val_steps: 100
   remove_columns:
     #- 'evidence_index'

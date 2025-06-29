@@ -12,6 +12,7 @@ from models.diff_classifier import Classifier
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 import os
+import sys
 import shutil
 from tqdm import tqdm
 from collections import deque
@@ -569,8 +570,8 @@ class DenovoDiffusionObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            #self.load_saved_weights(self.opt, "opt", config['load_last'])
-            #U.optimizer_to(self.opt, device)
+            self.load_saved_weights(self.opt, "opt", config['load_last'])
+            U.optimizer_to(self.opt, device)
         
         self.model.to(device)
 
@@ -675,8 +676,17 @@ class DenovoDiffusionObj(BaseDenovo):
 
 if __name__ == '__main__':
 
+    #######################
+    # Configuration files #
+    #######################
+
+    if len(sys.argv) > 1:
+        config_path = sys.argv[1]
+    else:
+        config_path = "./yaml/config.yaml"
+
     # Read yamls
-    with open("./yaml/config.yaml") as stream:
+    with open(config_path) as stream:
         config = yaml.safe_load(stream)
     # Overrides over a loaded previous experiment
     config_ = config.copy()
@@ -698,6 +708,7 @@ if __name__ == '__main__':
             print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
         else:
             svdir = os.path.join(config['prev_wts'])
+            timestamp = config['prev_wts']
         with open(os.path.join(config['prev_wts'], "yaml", "config.yaml")) as stream:
             config = yaml.safe_load(stream)
         # Replace previous settings with new ones
@@ -709,7 +720,6 @@ if __name__ == '__main__':
             'top_peaks', 'classifier_config', 'new_exp',
         ]:
             config[key] = config_[key]
-        timestamp = config['prev_wts']
     # Create new experiment
     elif config['save_weights']:
         rddir = None
@@ -719,8 +729,16 @@ if __name__ == '__main__':
     else:
         rddir = None
         svdir = './'
-        
-    # Downstream object
+
+    # Eval only. Must set before loader is created.
+    if config['eval_only']:
+        config['loader']['val_dataset_path'] = evconfig['eval_only']['eval_dataset_path']
+        config['loader']['val_name'] = evconfig['eval_only']['eval_name']
+    
+    #####################
+    # Downstream object #
+    #####################
+
     print("<DSCOMMENT> Denovo sequencing")
     if 'diff' in config['decoder_name']:
         print("<DSCOMMENT> Using diffusion decoder")
@@ -740,8 +758,11 @@ if __name__ == '__main__':
                 'model_parameters': D.model.total_params(),
 			},
 		)   
+    
+    ##################################
+    # Run training and/or evaluation #
+    ##################################
 
-    # Run training and/or evaluation
     if config['eval_only']:
         evc = evconfig['eval_only']
         
