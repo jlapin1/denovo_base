@@ -303,6 +303,10 @@ class Scale:
             self.tok2mass[tok] for tok in partition_seq(modified_sequence)['seq']
         )
 
+    def calc_mz(self, seq, charge, intseq=True):
+        tomass = self.intseq2mass if intseq else self.modseq2mass
+        return (tomass(seq) + 18.010565) / charge + 1.00727646688
+
 deltaPPM = lambda mprec, mpred: abs(mprec - mpred) * 1e6 / mprec
 
 def Dict2dev(Dict, device, inplace=False):

@@ -471,8 +471,9 @@ class DenovoArDSObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            self.load_saved_weights(self.opt, "opt", config['load_last'])     
-            U.optimizer_to(self.opt, device)
+            if config['load_last']:
+                self.load_saved_weights(self.opt, "opt", config['load_last'])     
+                U.optimizer_to(self.opt, device)
 
         self.model.to(device)
     
@@ -570,8 +571,9 @@ class DenovoDiffusionObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            self.load_saved_weights(self.opt, "opt", config['load_last'])
-            U.optimizer_to(self.opt, device)
+            if config['load_last']:
+                self.load_saved_weights(self.opt, "opt", config['load_last'])
+                U.optimizer_to(self.opt, device)
         
         self.model.to(device)
 
@@ -704,8 +706,9 @@ if __name__ == '__main__':
         rddir = os.path.join(config['prev_wts'])
         if config['new_exp']:
             svdir = os.path.join('save', timestamp)
-            U.create_experiment(svdir, svwts=config['save_weights'])
-            print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+            if not config['eval_only']:
+                U.create_experiment(svdir, svwts=config['save_weights'])
+                print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
         else:
             svdir = os.path.join(config['prev_wts'])
             timestamp = config['prev_wts']
