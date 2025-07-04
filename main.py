@@ -51,7 +51,7 @@ class BaseDenovo:
             # Phase 1 warmup
             self.lr_warmup_increment = (
                 (config['lr_warmup_end']-config['lr_warmup_start']) / 
-                config['lr_warmup_steps']
+                np.maximum(config['lr_warmup_steps'], 1)
             )
             self.starting_lr = config['lr_warmup_start']
             # Phase 2 flat
@@ -121,7 +121,7 @@ class BaseDenovo:
                     qualifier = '"last"'
             
             print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
-            obj.load_state_dict(th.load(weights_path, map_location=device))
+            obj.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
             if retain:
                 try:
