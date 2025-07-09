@@ -1,4 +1,4 @@
-eval_only: False
+eval_only: True
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
@@ -17,26 +17,26 @@ lr_floor: 5.0e-5
 lr_decay_steps: 1000000
 
 # Loading previous weights
-prev_wts: save/2025-07-02_13-09-47 # Load weights from previous run (project path->timestamp)
-load_last: True
+prev_wts: /cmnfs/proj/diffusion/experiments/2025-06-29_11-12-17 # Load weights from previous run (project path->timestamp)
+load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
 # Loader options
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2
-  val_name: saccharomyces_cerevisiae
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  val_name:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V2/ns_dictionary.txt
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/masses.tsv
   buffer_size: 1000
   num_workers: 4
   val_steps: 100

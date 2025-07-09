@@ -304,7 +304,7 @@ class DenovoDecoder(nn.Module):
         dec_config['num_inp_tokens'] = np.max(list(self.inpdict.values())) + 1
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
-        self.predcats = len(self.outdict.values())
+        self.predcats = len(np.unique(list(self.outdict.values())))
         self.scale = Scale(self.outdict)
 
         self.dec_config = dec_config
