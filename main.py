@@ -23,6 +23,8 @@ import wandb
 from glob import glob
 import metrics as met
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
@@ -278,11 +280,21 @@ class BaseDenovo:
             for m in intseq
         ]
 
-    def evaluation(self, dset='val', max_batches=1e10, save_df=False, no_grad=True, kwargs={}):
+    def evaluation(
+        self, 
+        dset='val', 
+        max_batches=1e10, 
+        save_df=False,
+        stream_write=False,
+        batches_btw_write=10,
+        no_grad=True, 
+        kwargs={}
+    ):
         
         # Dataframe
-        if save_df:
+        def initial_dataframe():
             dataframe = {
+                'name': [],
                 'targ_intseq': [],
                 'charge': [],
                 'mass': [],
@@ -294,6 +306,10 @@ class BaseDenovo:
                 'correct_aa': [],
                 'correct_peptide': [],
             }
+            return dataframe
+        if save_df or stream_write:
+            dataframe = initial_dataframe()
+            schema_defined = False
 
         # losses
         out = {'ce': 0}
@@ -351,7 +367,8 @@ class BaseDenovo:
                 },
             }
 
-            if save_df:
+            if save_df or stream_write:
+                dataframe['name'].extend(batch['experiment_name'])
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
                 dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
                 dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
@@ -362,7 +379,16 @@ class BaseDenovo:
                 dataframe['pred_aaseq'].extend(pred_strings)
                 dataframe['correct_aa'].extend([result[0] for result in aa_matches_batch])
                 dataframe['correct_peptide'].extend([result[1] for result in aa_matches_batch])
-            
+				
+                if stream_write and ((i+1) % batches_btw_write == 0):
+                    
+                    table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
+                    if not schema_defined:
+                        writer = pq.ParquetWriter('./hold.parquet', table.schema, compression='snappy')
+                        schema_defined = True
+                    writer.write_table(table)
+                    dataframe = initial_dataframe()
+
             # Add to totals
             for metric in dn_metrics['sum'].keys():
                 if metric not in tots['sum'].keys():
@@ -381,7 +407,12 @@ class BaseDenovo:
 
         self.on_eval_end()
         
-        if save_df:
+        if stream_write:
+            table = pa.Table.from_pandas(dataframe, preserve_index=False)
+            writer.write_table(table)
+            writer.close()
+            return out, None
+        elif save_df:   
             return out, pd.DataFrame(dataframe)
         else:
             return out
@@ -785,6 +816,7 @@ if __name__ == '__main__':
             dset=evc['set'], 
             max_batches=max_batches, 
             save_df=evc['save'], 
+            stream_write=evc['stream'],
             no_grad=False, 
             kwargs=D.eval_kwargs,
         )
@@ -792,7 +824,10 @@ if __name__ == '__main__':
         # Saving results
         if evc['save']:
             eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
-            df.to_parquet(eval_out_path)
+            if evc['stream']:
+                os.system(f"mv ./hold.parquet {eval_out_path}")
+            else:
+                df.to_parquet(eval_out_path)
         print("\n", out)
     else:
         print("Test validation", end='')

@@ -32,7 +32,7 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50):
     example['tokenized_sequence'] = np.array([dic[m] for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
     example['peptide_length'] = peptide_length
     example['spectrum_length'] = spectrum_length
-    #example['experiment_name'] = example['name']
+    example['experiment_name'] = example['name']
 
     return example
 
@@ -82,7 +82,7 @@ class LoaderObj:
             line.split()[0]:m for m, line in enumerate(open(dictionary_path))
         }
         amod_dic['X'] = len(amod_dic)
-        #amod_dic['C'] = amod_dic['C+57.021']
+        amod_dic['C'] = amod_dic['C+57.021']
         amod_dic_rev = {b:a for a,b in amod_dic.items()}
 
         return amod_dic, amod_dic_rev

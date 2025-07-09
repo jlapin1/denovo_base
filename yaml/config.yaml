@@ -36,7 +36,7 @@ loader:
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
   val_name:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/masses.tsv
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/masses.tsv
   buffer_size: 1000
   num_workers: 4
   val_steps: 100
