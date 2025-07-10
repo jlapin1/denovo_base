@@ -3,9 +3,9 @@ eval_only:
   eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
   eval_name:
   set: test
-  max_batches:
-  save: True
-  stream: True
+  max_batches: 11
+  save: False
+  stream: False
   outpath: ./output.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml

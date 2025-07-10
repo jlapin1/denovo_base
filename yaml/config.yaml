@@ -17,7 +17,7 @@ lr_floor: 5.0e-5
 lr_decay_steps: 1000000
 
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2025-06-29_11-12-17 # Load weights from previous run (project path->timestamp)
+prev_wts: /cmnfs/proj/diffusion/experiments/2025-06-28_22-37-54 # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -36,7 +36,7 @@ loader:
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
   val_name:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/masses.tsv
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/dictionary.tsv
   buffer_size: 1000
   num_workers: 4
   val_steps: 100
@@ -54,7 +54,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *
+decoder_name: diff # *diff* | *
 
 # Encoder model
 

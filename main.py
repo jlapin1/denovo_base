@@ -408,14 +408,14 @@ class BaseDenovo:
         self.on_eval_end()
         
         if stream_write:
-            table = pa.Table.from_pandas(dataframe, preserve_index=False)
+            table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
             writer.write_table(table)
             writer.close()
             return out, None
         elif save_df:   
             return out, pd.DataFrame(dataframe)
         else:
-            return out
+            return out, None
 
     def TrainEval(self, eval_dset='val'):
         start_time = time()
@@ -515,6 +515,8 @@ class DenovoArDSObj(BaseDenovo):
         target = deepcopy(batch['intseq'])
         
         dec_input = self.model.decoder.prepend_startok(dec_input)
+        
+        #batch['mass'] = batch['mass'] * batch['charge'] # for MKB trained model
 
         target = self.append_null_token(target)
         target = self.replace_with_eos_token(target, batch['peplen'])
@@ -569,7 +571,7 @@ class DenovoDiffusionObj(BaseDenovo):
             rddir=rddir,
         )
         self.training_loss_keys = ['loss', 'mse', 'decoder_nll', 'tT']
-        self.eval_kwargs = {'n': 1}
+        self.eval_kwargs = {'n': config['decoder_diff']['ensemble']['ensemble_n']}
 
         # Diffusion object
         if config['decoder_diff']['diffusion_config']['learn_sigma']: 
@@ -633,11 +635,13 @@ class DenovoDiffusionObj(BaseDenovo):
         dec_input = deepcopy(batch['intseq'])
         target = deepcopy(batch['intseq'])
 
+        #batch['mass'] = batch['mass'] * batch['charge'] # For MKB trained model
+
         # Schedule sampler
         timesteps = th.empty(bs).uniform_(
             0, self.model.diff_obj.num_timesteps
         ).floor().type(th.int32).to(target.device)
-        
+
         target = self.model.decoder.append_null_token(target)
         target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
 
@@ -807,6 +811,7 @@ if __name__ == '__main__':
                 D.model.decoder.clamp_denoised = evc['clamp_denoised']
             if evc['n'] is not None:
                 D.model.ens_size = evc['n']
+                D.eval_kwargs['n'] = D.model.ens_size
         
         # Turn gradients off for de novo model
         for parm in D.model.parameters(): parm.requires_grad=False
