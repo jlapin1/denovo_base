@@ -285,7 +285,7 @@ class GaussianDiffusion:
         self.my_loss_count = np.zeros((self.num_timesteps,))
         self.my_xstart_save = []
         self.my_xcur_save = []
-        try:
+        """try:
             save_this = np.stack([
                 betas, 
                 alphas, 
@@ -299,7 +299,7 @@ class GaussianDiffusion:
                 header="beta,alpha,alphacp,sqrt_alphacp,sqrt_1-alphacp,post_var"
             )
         except:
-            pass
+            pass"""
     
     def update_time_discretized_parameters(self, alphas_cumprod):
 

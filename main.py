@@ -222,6 +222,7 @@ class BaseDenovo:
                 self.opt.param_groups[-1]['lr'] += self.lr_warmup_increment
                 self.phase_counter[0] += 1
             else:
+                self.opt.param_groups[-1]['lr'] = self.config['lr_warmup_end'] # Notig fur einen Neustart
                 self.lr_phase = 1
         # Flat phase
         elif self.lr_phase == 1:
@@ -429,7 +430,7 @@ class BaseDenovo:
             self.on_train_epoch_end()
             
             # Eval
-            out = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
+            out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
             
             # Logging
             if self.config['log_wandb']:
@@ -836,7 +837,7 @@ if __name__ == '__main__':
         print("\n", out)
     else:
         print("Test validation", end='')
-        out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
         assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])

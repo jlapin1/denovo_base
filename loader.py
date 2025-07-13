@@ -32,7 +32,7 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50):
     example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
     example['peptide_length'] = peptide_length
     example['spectrum_length'] = spectrum_length
-    example['experiment_name'] = example['name']
+    if 'name' in example: example['experiment_name'] = example['name'] # compat
 
     return example
 
