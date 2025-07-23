@@ -823,7 +823,7 @@ if __name__ == '__main__':
             max_batches=max_batches, 
             save_df=evc['save'], 
             stream_write=evc['stream'],
-            no_grad=False, 
+            no_grad=True, 
             kwargs=D.eval_kwargs,
         )
         

@@ -1,10 +1,10 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
   eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
-  eval_name:
-  set: test
-  max_batches: 11
-  save: False
+  eval_name: cerevisiae
+  set: val
+  max_batches: 100
+  save: True
   stream: False
   outpath: ./output.parquet
   # diffusion only

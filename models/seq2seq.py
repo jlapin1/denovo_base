@@ -224,6 +224,9 @@ class Seq2SeqDiff(Seq2Seq):
         top_sequences = seqs[winners]
         logits = logits[winners]
         
+        # Additional outputs
+        additional_outputs = tuple(x.transpose(0,1)[winners] for x in additional_outputs)
+
         return_ = (top_sequences, logits) + additional_outputs
         return return_
 
