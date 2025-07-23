@@ -285,7 +285,7 @@ class GaussianDiffusion:
         self.my_loss_count = np.zeros((self.num_timesteps,))
         self.my_xstart_save = []
         self.my_xcur_save = []
-        try:
+        """try:
             save_this = np.stack([
                 betas, 
                 alphas, 
@@ -299,7 +299,7 @@ class GaussianDiffusion:
                 header="beta,alpha,alphacp,sqrt_alphacp,sqrt_1-alphacp,post_var"
             )
         except:
-            pass
+            pass"""
     
     def update_time_discretized_parameters(self, alphas_cumprod):
 
@@ -1162,20 +1162,7 @@ class GaussianDiffusion:
         save_xstart=False,
         cond_fn=None,
     ):
-        loop_fn = self.p_sample_loop_progressive
-        """sample = loop_fn(
-            model,
-            shape,
-            noise=noise,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            model_kwargs=model_kwargs,
-            device=device,
-            progress=progress,
-            top_p=top_p,
-            langevin_func=langevin_fn,
-            decoder_inputs=decoder_inputs,
-        )"""
+        
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
@@ -1208,7 +1195,9 @@ class GaussianDiffusion:
                 model_kwargs.pop('self_conditions')
         if 'loss_mask' in model_kwargs:
             loss_mask = model_kwargs.pop("loss_mask")
-
+        
+        if save_xstart: xstart_save = th.zeros(T, *shape, device=device)
+        if save_xcur: xcur_save = th.zeros(T+1, *shape, device=device)
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
             
@@ -1223,14 +1212,18 @@ class GaussianDiffusion:
                 top_p=top_p,
                 cond_fn=cond_fn,
             )
-            if save_xcur: self.my_xcur_save.append(img)
+            if save_xcur: xcur_save[i] = img
             img = out["sample"]
-            if save_xstart: self.my_xstart_save.append(out['pred_xstart'])
+            if save_xstart: xstart_save[i] = out['pred_xstart']
 
         final = out
-        if save_xcur: self.my_xcur_save.append(final['sample'])
-
-        return final['sample']
+        if save_xcur: xcur_save[-1] = final['sample']
+        
+        output = {'final': final['sample']}
+        if save_xstart: output['xstart_save'] = xstart_save
+        if save_xcur: output['xcur_save'] = xcur_save
+        
+        return output
 
     def _vb_terms_bpd_e2e(
         self,

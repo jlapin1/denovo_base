@@ -1,4 +1,4 @@
-eval_only: True
+eval_only: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
@@ -9,43 +9,45 @@ lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
 lr_warmup_end: 1.5e-4 # phase 2 LR
-lr_warmup_steps: 20000
+lr_warmup_steps: 20000 #20000
 # Phase 2 - Flat
-lr_flat_steps: 266000
+lr_flat_steps: 266000 #266000
 # Phase 3 - Decay
 lr_floor: 5.0e-5
-lr_decay_steps: 975000
+lr_decay_steps: 1000000
 
 # Loading previous weights
-prev_wts: #save/2025-05-20_11-54-42 # Load weights from previous run (project path->timestamp)
-load_last: False
+prev_wts: # Load weights from previous run (project path->timestamp)
+load_last: True
+new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
+save_last_freq: 10000
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
 # Loader options
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V1
-  val_name: saccharomyces_cerevisiae
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  val_name: cerevisiae
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt
-  buffer_size: 10000
-  num_workers: 9
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
+  buffer_size: 1000
+  num_workers: 4
   val_steps: 100
   remove_columns:
-    - 'evidence_index'
+    #- 'evidence_index'
     - 'scan_number'
     - 'sequence'
     - 'precursor_mz'
     - 'retention_time'
-    - 'title'
-    - 'scans'
+    #- 'title'
+    #- 'scans'
   scratch:
     use: False
     path: /media/storage/scratch/ninespecies/
@@ -150,14 +152,41 @@ decoder_diff:
     prenorm: True
     preembed: True
     penultimate_units:
-    dropout: 0
+    dropout: 0.25
     alphabet: False
     self_condition: True
     clamp_denoised: False
   # ensemble prediction
   ensemble:
-    ensemble_n: 10
+    ensemble_n: 1
     mass_tol: 1e-2
+decoder_mdlm:
+  diffusion_config:
+    T: 0
+    subs_masking: False
+    parameterization: subs
+    time_conditioning: True
+    sampling:
+      predictor: ddpm_cache
+      steps: 128
+      noise_removal: True
+      semi_ar: False
+      stride_length: 1
+      num_strides: 1
+    eval:
+    training:
+      ema: 0.9999
+      antithetic_sampling: True
+      importance_sampling: False
+      sampling_eps: 1.0e-3
+      change_of_variables: False
+    noise:
+      type: loglinear
+      sigma_min: 1.0e-4
+      sigma_max: 20
+      exponent: 1.5
+    model:
+      length: 41
 
 # Leaving ckpt empty deactivate classifier guided diffusion
 classifier_config:

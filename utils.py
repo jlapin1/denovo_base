@@ -277,9 +277,10 @@ class Scale:
         self.amod_dict = amod_dict
         int2mass = np.zeros((len(amod_dict)))
         for aa, integer in amod_dict.items():
-            if len(aa.split('_')) == 2:
-                aa, modwt = aa.split('_')
-                int2mass[integer] = masses[aa] + eval(modwt)
+            split = re.split('[+\-_]', aa)
+            if len(split) == 2:
+                aa, modwt = split
+                int2mass[integer] = masses.get(aa,0) + eval(modwt)
             else:
                 if aa in masses.keys():
                     int2mass[integer] = masses[aa]
@@ -291,13 +292,20 @@ class Scale:
     
     def intseq2mass(self, intseq):
         sumdim = 0 if len(intseq.shape) == 1 else 1
+        gatherdim = sumdim
         masses = self.mp.to(intseq.device)
-        return th.gather(masses, 0, intseq).sum(sumdim)
+        if len(intseq.shape) > 1:
+            masses = masses[None].tile([intseq.shape[0], 1])
+        return th.gather(masses, gatherdim, intseq.type(th.int64)).sum(sumdim)
 
     def modseq2mass(self, modified_sequence):
         return np.sum(
             self.tok2mass[tok] for tok in partition_seq(modified_sequence)['seq']
         )
+
+    def calc_mz(self, seq, charge, intseq=True):
+        tomass = self.intseq2mass if intseq else self.modseq2mass
+        return (tomass(seq) + 18.010565) / charge + 1.00727646688
 
 deltaPPM = lambda mprec, mpred: abs(mprec - mpred) * 1e6 / mprec
 

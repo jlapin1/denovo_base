@@ -116,7 +116,7 @@ class Seq2SeqDiff(Seq2Seq):
         decoder_config['kv_indim'] = self.encoder.run_units
         self.diff_obj = create_diffusion(**diff_config)
         self.decoder = DenovoDiffusionDecoder(
-            input_output_units = diff_config['in_channel'],
+            input_output_units = diff_config['in_channel'], # perhaps replace this with running units
             clip_denoised      = diff_config['clip_denoised'],
             output_sigma       = diff_config['learn_sigma'],
             token_dict         = token_dict,
@@ -155,12 +155,19 @@ class Seq2SeqDiff(Seq2Seq):
         batch['peplen'] = batch['peplen'][:,None].tile(1, n).reshape(-1)
         return batch
 
-    def forward(self, batch, save_xcur=False, cond_fn=None):
+    def forward(self, batch, save_xcur=False, save_xstart=False, cond_fn=None, progress=False):
         embedding = self.encoder_embedding(batch)
-        final, logits = self.decoder.predict_sequence(embedding, batch, save_xcur=save_xcur, cond_fn=cond_fn)
-        return final, logits
+        output = self.decoder.predict_sequence(
+            embedding, 
+            batch, 
+            save_xcur=save_xcur, 
+            save_xstart=save_xstart, 
+            cond_fn=cond_fn,
+            progress=progress,
+        )
+        return output
 
-    def predict_sequence(self, batch, save_xcur=False, n=None, cls_dict=None):
+    def predict_sequence(self, batch, save_xcur=False, save_xstart=False, n=None, cls_dict=None, progress=False):
         bs, sl = batch['mz'].shape
         n = self.ens_size if n==None else n
         cond_fn = (
@@ -170,8 +177,23 @@ class Seq2SeqDiff(Seq2Seq):
 
         full_size = bs*n
         batch = self.expand_batch(batch, n=n)
-        seqs, logits = self(batch, save_xcur=save_xcur, cond_fn=cond_fn)
-        #uniqs, inds, counts = seqs.unique(dim=0, return_inverse=True, return_counts=True)
+        diffout = self(
+            batch, 
+            save_xcur=save_xcur, 
+            save_xstart=save_xstart, 
+            cond_fn=cond_fn, 
+            progress=progress,
+        )
+        # Depending on arguments, the output of the decoder will differ
+        if len(diffout) == 4:
+            seqs, logits, xcur, xstart = diffout
+            additional_outputs = (xcur, xstart)
+        elif len(diffout) == 3:
+            seqs, logits, xcurstart = diffout
+            additional_outputs = (xcurstart,)
+        else:
+            seqs, logits = diffout
+            additional_outputs = ()
         
         seqs_rs = seqs.reshape(bs, n, -1)
         ls = [seqs_rs[i].unique(dim=0, return_inverse=True, return_counts=True) for i in range(bs)]
@@ -203,7 +225,11 @@ class Seq2SeqDiff(Seq2Seq):
         top_sequences = seqs[winners]
         logits = logits[winners]
         
-        return top_sequences, logits #counts[inds][winners]
+        # Additional outputs
+        additional_outputs = tuple(x.transpose(0,1)[winners] for x in additional_outputs)
+
+        return_ = (top_sequences, logits) + additional_outputs
+        return return_
 
 class Seq2SeqMDLM(Seq2Seq):
     def __init__(

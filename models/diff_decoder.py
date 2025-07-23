@@ -72,7 +72,7 @@ class base_diffusion_decoder(nn.Module):
         self.EOS = self.outdict['<EOS>']
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
-        self.predcats = len(self.outdict.values())
+        self.predcats = len(np.unique(list(self.outdict.values())))
         self.scale = Scale(self.outdict)
         
         ############
@@ -339,7 +339,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
             out_dict['var'] = logvar_fraction
         return out_dict
 
-    def predict_sequence(self, embedding, batch, save_xcur=False, cond_fn=None):
+    def predict_sequence(self, embedding, batch, save_xcur=False, save_xstart=False, cond_fn=None, progress=False):
         shape = (
             embedding['emb'].shape[0],
             self.max_sl,
@@ -354,23 +354,8 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         # Create fully noised real data
         device = model_kwargs['kv_feats'].device
         noise = th.randn(*shape, device=device)
-        
-        """target = self.append_null_token(batch['intseq'])
-        target = self.replace_with_eos_token(target, batch['peplen'])
-        loss_mask = self.sequence_mask(target)
-        model_kwargs['loss_mask'] = loss_mask
-        x_start_mean = self.get_embed(target)
-        std = _extract_into_tensor(
-            self.diff_obj.sqrt_one_minus_alphas_cumprod,
-            th.tensor([0]).to(x_start_mean.device),
-            x_start_mean.shape,
-        )
-        x_start = self.diff_obj.get_x_start(x_start_mean, std)
-        ts = th.tensor(x_start.shape[0]*[self.diff_obj.num_timesteps-1]).to(x_start.device)
-        #ts = th.tensor(x_start.shape[0]*[2000-1]).to(x_start.device)
-        noise = self.diff_obj.q_sample(x_start, ts, noise=noise)"""
 
-        units = self.diff_obj.my_p_sample_loop(
+        output = self.diff_obj.my_p_sample_loop(
             self,
             shape,
             noise=noise,
@@ -378,12 +363,20 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
             clip_denoised=self.clip_denoised,
             model_kwargs=model_kwargs,
             save_xcur=save_xcur,
+            save_xstart=save_xstart,
             cond_fn=cond_fn,
+            progress=progress,
         )
-        logits = self.get_logits(units) # bs, 31, predcats
+        logits = self.get_logits(output['final']) # bs, sl, predcats
         final = logits.argmax(dim=-1)
         
-        return final, logits
+        return_ = final, logits
+        if save_xcur: 
+            return_ = return_ + (output['xcur_save'],)
+        if save_xstart: 
+            return_ = return_ + (output['xstart_save'],)
+
+        return return_
 
     def clamp(self, x_0, *args):
         embedding = self.lm_head.weight # 24, 512
@@ -464,7 +457,7 @@ class MDLMDecoder(base_diffusion_decoder):
         self.outdict['<MASK>'] = len(self.outdict)
         self.MASK = self.outdict['<MASK>']
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
-        self.predcats = len(self.outdict.values())
+        self.predcats = len(np.unique(list(self.outdict.values())))
 
     def forward(self,
         x,

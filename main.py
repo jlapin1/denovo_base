@@ -12,6 +12,7 @@ from models.diff_classifier import Classifier
 from models.diff_decoder import DenovoDiffusionDecoder
 from models.decoder import DenovoDecoder
 import os
+import sys
 import shutil
 from tqdm import tqdm
 from collections import deque
@@ -22,13 +23,15 @@ import wandb
 from glob import glob
 import metrics as met
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
 class BaseDenovo:
-    def __init__(self, config, svdir='./downstream/'):
+    def __init__(self, config, svdir='./downstream/', rddir=None):
         
         # Config is entire downstream yaml
         self.config = config
@@ -42,6 +45,7 @@ class BaseDenovo:
             if not os.path.exists(os.path.join(svdir, 'weights')):
                 os.mkdir(os.path.join(svdir, 'weights'))
         self.svdir = svdir
+        self.rddir = rddir
         self.config['sl'] = self.config['pep_length'][1]
         
         self.phase_counter = [0, 0, 0]
@@ -49,7 +53,7 @@ class BaseDenovo:
             # Phase 1 warmup
             self.lr_warmup_increment = (
                 (config['lr_warmup_end']-config['lr_warmup_start']) / 
-                config['lr_warmup_steps']
+                np.maximum(config['lr_warmup_steps'], 1)
             )
             self.starting_lr = config['lr_warmup_start']
             # Phase 2 flat
@@ -69,6 +73,7 @@ class BaseDenovo:
         
         self.running_loss = []
         self.global_step = 0
+        self.save_last_counter = 0
 
         # Dataloader
         if 'val_steps' in self.config['loader'].keys(): # backwards compatibility
@@ -90,10 +95,17 @@ class BaseDenovo:
     def save_weights(self, fp='./model.wts'):
         th.save(self.model.state_dict(), fp)
     
+    def save_last(self, override=False):
+        ready = self.global_step - self.save_last_counter >= self.config['save_last_freq']
+        if ready or override:
+            self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
+            U.save_optimizer_state(self.opt, os.path.join(self.svdir, 'weights/opt_last.wts'))
+            self.save_last_counter = self.global_step
+
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
         print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
-        possible_weights_path = glob(os.path.join(self.svdir, "weights", regex))
+        possible_weights_path = glob(os.path.join(self.rddir, "weights", regex))
         
         # Found something
         if len(possible_weights_path) > 0:
@@ -113,7 +125,7 @@ class BaseDenovo:
                     qualifier = '"last"'
             
             print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
-            obj.load_state_dict(th.load(weights_path, map_location=device))
+            obj.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
             if retain:
                 try:
@@ -168,27 +180,26 @@ class BaseDenovo:
             step_start = time()
             
             if self.config['log_wandb']: wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
-
+            
             losses = self.train_step(batch)
             self.global_step += 1
             
             if self.config['log_wandb']:
                 loss_printout = 'Loss: %7f'%losses['loss']
+                global_grad_norm = U.global_grad_norm(self.model)
+                self.log_wandb(losses, global_grad_norm)
             else:
                 for key in running_loss.keys(): running_loss[key].append(losses[key].detach().cpu())
                 rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
                 loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
             pbar.set_description(f"Loss: {loss_printout}")
-
-            if self.config['log_wandb']:
-                global_grad_norm = U.global_grad_norm(self.model)
-                self.log_wandb(losses, global_grad_norm)
-                
-
+            
             self.running_loss.append(losses['loss'].detach().cpu())
             if self.log and (self.global_step % svfreq == 0):
                 self.savetxt(self.running_loss)
                 self.running_loss = []
+            if self.config['save_weights']:
+                self.save_last()
 
             step_end = time()
             
@@ -213,6 +224,7 @@ class BaseDenovo:
                 self.opt.param_groups[-1]['lr'] += self.lr_warmup_increment
                 self.phase_counter[0] += 1
             else:
+                self.opt.param_groups[-1]['lr'] = self.config['lr_warmup_end'] # Notig fur einen Neustart
                 self.lr_phase = 1
         # Flat phase
         elif self.lr_phase == 1:
@@ -271,11 +283,21 @@ class BaseDenovo:
             for m in intseq
         ]
 
-    def evaluation(self, dset='val', max_batches=1e10, save_df=False, no_grad=True, kwargs={}):
+    def evaluation(
+        self, 
+        dset='val', 
+        max_batches=1e10, 
+        save_df=False,
+        stream_write=False,
+        batches_btw_write=10,
+        no_grad=True, 
+        kwargs={}
+    ):
         
         # Dataframe
-        if save_df:
+        def initial_dataframe():
             dataframe = {
+                'name': [],
                 'targ_intseq': [],
                 'charge': [],
                 'mass': [],
@@ -287,6 +309,10 @@ class BaseDenovo:
                 'correct_aa': [],
                 'correct_peptide': [],
             }
+            return dataframe
+        if save_df or stream_write:
+            dataframe = initial_dataframe()
+            schema_defined = False
 
         # losses
         out = {'ce': 0}
@@ -344,7 +370,8 @@ class BaseDenovo:
                 },
             }
 
-            if save_df:
+            if save_df or stream_write:
+                dataframe['name'].extend(batch['experiment_name'])
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
                 dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
                 dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
@@ -355,7 +382,16 @@ class BaseDenovo:
                 dataframe['pred_aaseq'].extend(pred_strings)
                 dataframe['correct_aa'].extend([result[0] for result in aa_matches_batch])
                 dataframe['correct_peptide'].extend([result[1] for result in aa_matches_batch])
-            
+				
+                if stream_write and ((i+1) % batches_btw_write == 0):
+                    
+                    table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
+                    if not schema_defined:
+                        writer = pq.ParquetWriter('./hold.parquet', table.schema, compression='snappy')
+                        schema_defined = True
+                    writer.write_table(table)
+                    dataframe = initial_dataframe()
+
             # Add to totals
             for metric in dn_metrics['sum'].keys():
                 if metric not in tots['sum'].keys():
@@ -374,10 +410,15 @@ class BaseDenovo:
 
         self.on_eval_end()
         
-        if save_df:
+        if stream_write:
+            table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
+            writer.write_table(table)
+            writer.close()
+            return out, None
+        elif save_df:   
             return out, pd.DataFrame(dataframe)
         else:
-            return out
+            return out, None
 
     def TrainEval(self, eval_dset='val'):
         start_time = time()
@@ -391,7 +432,7 @@ class BaseDenovo:
             self.on_train_epoch_end()
             
             # Eval
-            out = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
+            out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
             
             # Logging
             if self.config['log_wandb']:
@@ -412,8 +453,7 @@ class BaseDenovo:
             
             # Saving the checkpoint
             if self.config['save_weights']:
-                self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
-                U.save_optimizer_state(self.opt, os.path.join(self.svdir, 'weights/opt_last.wts'))
+                self.save_last(override=True)
                 if highscore == out[self.config['high_score']]:
                     ext = f"epoch{i}_high_{highscore:.3f}"
                     wtsdir = os.path.join(self.svdir, "weights")
@@ -438,10 +478,11 @@ class BaseDenovo:
         pass
 
 class DenovoArDSObj(BaseDenovo):
-    def __init__(self, config, svdir='./dswts/'):
+    def __init__(self, config, svdir='./dswts/', rddir=None):
         super().__init__(
             config=config,
-            svdir=svdir
+            svdir=svdir,
+            rddir=rddir,
         )
         self.training_loss_keys = ['loss']
         self.eval_kwargs = {}
@@ -463,8 +504,9 @@ class DenovoArDSObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            self.load_saved_weights(self.opt, "opt", config['load_last'])     
-            U.optimizer_to(self.opt, device)
+            if config['load_last']:
+                self.load_saved_weights(self.opt, "opt", config['load_last'])     
+                U.optimizer_to(self.opt, device)
 
         self.model.to(device)
     
@@ -475,6 +517,8 @@ class DenovoArDSObj(BaseDenovo):
         target = deepcopy(batch['intseq'])
         
         dec_input = self.model.decoder.prepend_startok(dec_input)
+        
+        #batch['mass'] = batch['mass'] * batch['charge'] # for MKB trained model
 
         target = self.append_null_token(target)
         target = self.replace_with_eos_token(target, batch['peplen'])
@@ -522,13 +566,14 @@ class DenovoArDSObj(BaseDenovo):
         })
 
 class DenovoDiffusionObj(BaseDenovo):
-    def __init__(self, config, svdir='./dswts/'):
+    def __init__(self, config, diff_config=None, svdir='./dswts/', rddir=None):
         super().__init__(
             config=config, 
-            svdir=svdir
+            svdir=svdir,
+            rddir=rddir,
         )
         self.training_loss_keys = ['loss', 'mse', 'decoder_nll', 'tT']
-        self.eval_kwargs = {'n': 1}
+        self.eval_kwargs = {'n': config['decoder_diff']['ensemble']['ensemble_n']}
 
         # Diffusion object
         if config['decoder_diff']['diffusion_config']['learn_sigma']: 
@@ -561,8 +606,9 @@ class DenovoDiffusionObj(BaseDenovo):
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            self.load_saved_weights(self.opt, "opt", config['load_last'])
-            U.optimizer_to(self.opt, device)
+            if config['load_last']:
+                self.load_saved_weights(self.opt, "opt", config['load_last'])
+                U.optimizer_to(self.opt, device)
         
         self.model.to(device)
 
@@ -591,11 +637,13 @@ class DenovoDiffusionObj(BaseDenovo):
         #dec_input = deepcopy(batch['intseq'])
         target = deepcopy(batch['intseq'])
 
+        #batch['mass'] = batch['mass'] * batch['charge'] # For MKB trained model
+
         # Schedule sampler
         timesteps = th.empty(bs).uniform_(
             0, self.model.diff_obj.num_timesteps
         ).floor().type(th.int32).to(target.device)
-        
+
         target = self.model.decoder.append_null_token(target)
         target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
 
@@ -666,15 +714,16 @@ class DenovoDiffusionObj(BaseDenovo):
         pass
 
 class DenovoMDLMObj(BaseDenovo):
-    def __init__(self, config, svdir='./save/'):
+    def __init__(self, config, svdir='./save/', rddir=None):
         super().__init__(
             config=config, 
-            svdir=svdir
+            svdir=svdir,
+            rddir=rddir,
         )
         self.training_loss_keys.extend(['loss'])
 
         from models.seq2seq import Seq2SeqMDLM
-        diff_config = {
+        """diff_config = {
             'T': 0,
             'subs_masking': False,
             'parameterization': 'subs',
@@ -705,7 +754,8 @@ class DenovoMDLMObj(BaseDenovo):
             'model': {
                 'length': 40+1,
             }
-        }
+        }"""
+        diff_config = config['decoder_mdlm']['diffusion_config']
         self.max_length = diff_config['model']['length']
         config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
@@ -808,7 +858,17 @@ if __name__ == '__main__':
     # Read yamls #
     ##############
 
-    with open("./yaml/config.yaml") as stream:
+    #######################
+    # Configuration files #
+    #######################
+
+    if len(sys.argv) > 1:
+        config_path = sys.argv[1]
+    else:
+        config_path = "./yaml/config.yaml"
+
+    # Read yamls
+    with open(config_path) as stream:
         config = yaml.safe_load(stream)
     # Overrides over a loaded previous experiment
     config_ = config.copy()
@@ -821,27 +881,42 @@ if __name__ == '__main__':
     ########################################################
 
     # Continuing previous downstream run
+    timestamp = U.timestamp()
     if config['prev_wts'] is not None:
-        svdir = os.path.join(config['prev_wts'])
+        rddir = os.path.join(config['prev_wts'])
+        if config['new_exp']:
+            svdir = os.path.join('save', timestamp)
+            if not config['eval_only']:
+                U.create_experiment(svdir, svwts=config['save_weights'])
+                print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+        else:
+            svdir = os.path.join(config['prev_wts'])
+            timestamp = config['prev_wts']
         with open(os.path.join(config['prev_wts'], "yaml", "config.yaml")) as stream:
             config = yaml.safe_load(stream)
         # Replace previous settings with new ones
         for key in [
             'epochs', 'prev_wts', 'load_last', 'lr_schedule',
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
+            'lr_flat_steps', 'lr_floor', 'lr_decay_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
-            'top_peaks', 'classifier_config',
+            'top_peaks', 'classifier_config', 'new_exp',
         ]:
             config[key] = config_[key]
-        timestamp = config['prev_wts']
     # Create new experiment
     elif config['save_weights']:
-        timestamp = U.timestamp()
+        rddir = None
         svdir = os.path.join('save', timestamp)
         U.create_experiment(svdir, svwts=config['save_weights'])
         print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
     else:
+        rddir = None
         svdir = './'
+
+    # Eval only. Must set before loader is created.
+    if config['eval_only']:
+        config['loader']['val_dataset_path'] = evconfig['eval_only']['eval_dataset_path']
+        config['loader']['val_name'] = evconfig['eval_only']['eval_name']
     
     #####################
     # Downstream object #
@@ -850,13 +925,13 @@ if __name__ == '__main__':
     print("<DSCOMMENT> Denovo sequencing")
     if 'diff' in config['decoder_name']:
         print("<DSCOMMENT> Using diffusion decoder")
-        D = DenovoDiffusionObj(config, svdir=svdir)
+        D = DenovoDiffusionObj(config, svdir=svdir, rddir=rddir)
     elif 'mdlm' in config['decoder_name']:
         print("<DSCOMMENT> Using masked diffusion language decoder")
-        D = DenovoMDLMObj(config, svdir=svdir)
+        D = DenovoMDLMObj(config, svdir=svdir, rddir=rddir)
     else:
         print("<DSCOMMENT> Using autoregressive decoder")
-        D = DenovoArDSObj(config, svdir=svdir)
+        D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)
 
     # WandB
     if config['log_wandb'] and (config['eval_only'] == False):
@@ -869,7 +944,7 @@ if __name__ == '__main__':
                 'model_parameters': D.model.total_params(),
 			},
 		)   
-
+    
     ##################################
     # Run training and/or evaluation #
     ##################################
@@ -884,6 +959,7 @@ if __name__ == '__main__':
                 D.model.decoder.clamp_denoised = evc['clamp_denoised']
             if evc['n'] is not None:
                 D.model.ens_size = evc['n']
+                D.eval_kwargs['n'] = D.model.ens_size
         
         # Turn gradients off for de novo model
         for parm in D.model.parameters(): parm.requires_grad=False
@@ -893,18 +969,22 @@ if __name__ == '__main__':
             dset=evc['set'], 
             max_batches=max_batches, 
             save_df=evc['save'], 
-            no_grad=False, 
+            stream_write=evc['stream'],
+            no_grad=True, 
             kwargs=D.eval_kwargs,
         )
         
         # Saving results
         if evc['save']:
             eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
-            df.to_parquet(eval_out_path)
+            if evc['stream']:
+                os.system(f"mv ./hold.parquet {eval_out_path}")
+            else:
+                df.to_parquet(eval_out_path)
         print("\n", out)
     else:
         print("Test validation", end='')
-        out = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
         assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])
