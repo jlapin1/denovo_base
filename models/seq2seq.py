@@ -94,8 +94,8 @@ class Seq2SeqAR(Seq2Seq):
 
     def predict_sequence(self, batch):
         embedding = self.encoder_embedding(batch)
-        final, logits = self.decoder.predict_sequence(embedding, batch)
-        return final, logits
+        out_dict = self.decoder.predict_sequence(embedding, batch)
+        return out_dict
 
 class Seq2SeqDiff(Seq2Seq):
     def __init__(
@@ -166,7 +166,26 @@ class Seq2SeqDiff(Seq2Seq):
         )
         return output
 
-    def predict_sequence(self, batch, save_xcur=False, save_xstart=False, n=None, cls_dict=None, progress=False):
+    def calculate_entropy(self, trajectory):
+        batch_size, traj_size, sequence_length, logits_size = trajectory.shape
+
+        traj = self.decoder.get_logits(trajectory.detach()).softmax(dim=-1) # bs, traj, sl, logits
+        entropies = (-traj*traj.log()).sum(-1).mean(1)
+        #mask = th.arange(sequence_length, device=trajectory.device)[None].tile([batch_size, 1]) <= peptide_length[:,None]
+        #peptide_entropies = (entropies*mask).sum(1) / peptide_length
+
+        return entropies
+
+    def predict_sequence(
+        self,
+        batch,
+        save_xcur=False,
+        save_xstart=True,
+        entropy=True, # replace logits with entropy calculation
+        n=None,
+        cls_dict=None,
+        progress=False,
+    ):
         bs, sl = batch['mz'].shape
         n = self.ens_size if n==None else n
         cond_fn = (
@@ -184,15 +203,23 @@ class Seq2SeqDiff(Seq2Seq):
             progress=progress,
         )
         # Depending on arguments, the output of the decoder will differ
-        if len(diffout) == 4:
+        """if len(diffout) == 4:
             seqs, logits, xcur, xstart = diffout
             additional_outputs = (xcur, xstart)
         elif len(diffout) == 3:
             seqs, logits, xcurstart = diffout
-            additional_outputs = (xcurstart,)
+            if entropy:
+                logits = self.calculate_entropy(xcurstart)
+                additional_outputs = ()
+            else:
+                additional_outputs = (xcurstart,)
         else:
             seqs, logits = diffout
-            additional_outputs = ()
+            additional_outputs = ()"""
+        seqs = diffout.pop('prediction')
+        logits = diffout.pop('logits')
+        if entropy:
+            diffout['entropy'] = self.calculate_entropy(diffout['xstart'])
         
         seqs_rs = seqs.reshape(bs, n, -1)
         ls = [seqs_rs[i].unique(dim=0, return_inverse=True, return_counts=True) for i in range(bs)]
@@ -225,8 +252,8 @@ class Seq2SeqDiff(Seq2Seq):
         logits = logits[winners]
         
         # Additional outputs
-        additional_outputs = tuple(x.transpose(0,1)[winners] for x in additional_outputs)
+        additional_outputs = {x: y[winners] for x,y in diffout.items()}
 
-        return_ = (top_sequences, logits) + additional_outputs
+        return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
         return return_
 

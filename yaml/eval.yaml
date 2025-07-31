@@ -5,8 +5,8 @@ eval_only:
   set: val
   max_batches: 100
   save: True
-  stream: False
-  outpath: ./output.parquet
+  stream: True
+  outpath: ./output_kingdoms.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing

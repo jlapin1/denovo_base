@@ -327,11 +327,11 @@ class DenovoDiffusionDecoder(nn.Module):
         logits = self.get_logits(output['final']) # bs, sl, predcats
         final = logits.argmax(dim=-1)
         
-        return_ = final, logits
-        if save_xcur: 
-            return_ = return_ + (output['xcur_save'],)
-        if save_xstart: 
-            return_ = return_ + (output['xstart_save'],)
+        return_ = {'prediction': final, 'logits': logits}
+        if save_xcur:
+            return_['xcur'] = output['xcur_save']
+        if save_xstart:
+            return_['xstart'] = output['xstart_save']
 
         return return_
 

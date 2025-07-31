@@ -293,7 +293,7 @@ class BaseDenovo:
     ):
         
         # Dataframe
-        def initial_dataframe():
+        def initial_dataframe(extra_keys: list=[]):
             dataframe = {
                 'name': [],
                 'targ_intseq': [],
@@ -307,6 +307,7 @@ class BaseDenovo:
                 'correct_aa': [],
                 'correct_peptide': [],
             }
+            for key in extra_keys: dataframe[key] = []
             return dataframe
         if save_df or stream_write:
             dataframe = initial_dataframe()
@@ -334,18 +335,20 @@ class BaseDenovo:
             if no_grad:
                 with th.no_grad():
                     seqint, target, loss_mask = self.inptarg(batchdev)
-                    prediction, probs = self.model.predict_sequence(batchdev, **kwargs)
+                    out_dict = self.model.predict_sequence(batchdev, **kwargs)
             else:
                 seqint, target, loss_mask = self.inptarg(batchdev)
-                prediction, probs = self.model.predict_sequence(batchdev, **kwargs)
+                out_dict = self.model.predict_sequence(batchdev, **kwargs)
+            prediction = out_dict.pop('prediction')
+            probs = out_dict.pop('logits')
             
             # Do some resizing/reshaping
             prediction = prediction[..., :target.shape[1]] # loaded shapes can change based on batch
             probs = probs[:, :target.shape[1]]
             predicted_probs = probs.softmax(-1).gather(-1, prediction[...,None].type(th.int64)).squeeze()
-            pred = probs.transpose(-1,-2)
             
             # Cross entropy
+            pred = probs.transpose(-1,-2)
             out['ce'] += (
                 F.cross_entropy(pred, target, reduction='none')[loss_mask].sum()
             )
@@ -368,6 +371,16 @@ class BaseDenovo:
                 },
             }
 
+            # Add to totals
+            for metric in dn_metrics['sum'].keys():
+                if metric not in tots['sum'].keys():
+                    tots['sum'][metric] = 0
+                    tots['total'][metric] = 0
+                tots['sum'][metric] += dn_metrics['sum'][metric]
+                tots['total'][metric] += dn_metrics['total'][metric]
+
+            self.on_eval_step_end(batchdev, out_dict, dataframe)
+            
             if save_df or stream_write:
                 dataframe['name'].extend(batch['experiment_name'])
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
@@ -389,26 +402,16 @@ class BaseDenovo:
                         schema_defined = True
                     writer.write_table(table)
                     dataframe = initial_dataframe()
-
-            # Add to totals
-            for metric in dn_metrics['sum'].keys():
-                if metric not in tots['sum'].keys():
-                    tots['sum'][metric] = 0
-                    tots['total'][metric] = 0
-                tots['sum'][metric] += dn_metrics['sum'][metric]
-                tots['total'][metric] += dn_metrics['total'][metric]
-
-            self.on_eval_step_end(target, loss_mask)
         
         steps = i+1
         totsz = self.config['batch_size']*steps
         out['ce'] = float((out['ce'] / (totsz * self.config['sl'])).cpu().detach().numpy())
         for metric in tots['sum'].keys():
             out[metric] = tots['sum'][metric] /  tots['total'][metric]
-
+        
         self.on_eval_end()
         
-        if stream_write:
+        if stream_write and (len(dataframe['name']) > 0):
             table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
             writer.write_table(table)
             writer.close()
@@ -706,8 +709,16 @@ class DenovoDiffusionObj(BaseDenovo):
         self.model.diff_obj.my_loss_history = np.zeros((self.model.diff_obj.num_timesteps, 3))
         self.model.diff_obj.my_loss_count = np.zeros((self.model.diff_obj.num_timesteps,))
     
-    def on_eval_step_end(self, target, mask):
-        pass
+    def on_eval_step_end(self, batch, out_dict, dataframe):
+        if 'entropy' not in dataframe:
+            dataframe['entropy'] = []
+        
+        entropies = out_dict['entropy']
+        pl = batch['peplen']
+        bs, sl = entropies.shape
+        mask = th.arange(sl, device=pl.device)[None].tile([bs, 1]) <= pl[:,None]
+        peptide_entropies = (entropies*mask).sum(1) / pl
+        dataframe['entropy'].extend(peptide_entropies.cpu().numpy().tolist())
 
     def on_eval_end(self):
         pass
