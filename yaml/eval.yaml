@@ -6,7 +6,7 @@ eval_only:
   max_batches: 100
   save: True
   stream: True
-  outpath: ./output_kingdoms.parquet
+  outpath: ./output_kingdoms_2point0.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing

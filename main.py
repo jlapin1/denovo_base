@@ -378,10 +378,9 @@ class BaseDenovo:
                     tots['total'][metric] = 0
                 tots['sum'][metric] += dn_metrics['sum'][metric]
                 tots['total'][metric] += dn_metrics['total'][metric]
-
-            self.on_eval_step_end(batchdev, out_dict, dataframe)
             
             if save_df or stream_write:
+                self.on_eval_step_end(batchdev, out_dict, dataframe)
                 dataframe['name'].extend(batch['experiment_name'])
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
                 dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
