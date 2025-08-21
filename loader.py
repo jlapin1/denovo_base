@@ -274,6 +274,9 @@ class LoaderHF(LoaderObj):
                 (example['precursor_charge'] >= kwargs['charge'][0]) &
                 (example['precursor_charge'] <= kwargs['charge'][1])
             )
+        
+        # Chimeric
+        #dataset = dataset.filter(lambda example: example['chimeric'])
 
         # Filter val set for dispersed examples
         if 'val_steps' in kwargs.keys():

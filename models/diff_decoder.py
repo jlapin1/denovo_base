@@ -74,6 +74,30 @@ class base_diffusion_decoder(nn.Module):
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = len(np.unique(list(self.outdict.values())))
         self.scale = Scale(self.outdict)
+
+        self.dec_config = dec_config
+        RU = dec_config['running_units']
+        self.RU = RU
+        self.input_output_units = input_output_units
+        self.use_mass = dec_config['use_mass']
+        self.use_charge = dec_config['use_charge']
+        self.max_sl = dec_config['sequence_length'] # + 1
+        self.final_down_proj = nn.Sequential(
+            nn.Linear(RU, RU),
+            nn.ReLU(),
+            nn.Linear(RU, input_output_units)
+        )
+        self.output_sigma = output_sigma
+        if output_sigma:
+            self.sigma_down_proj = nn.Sequential(
+                nn.Linear(RU, input_output_units),
+                nn.Identity()
+            )
+        self.self_condition = self_condition
+        self.clip_denoised = clip_denoised
+        self.clamp_denoised = clamp_denoised
+        self.time_dimension = timestep_dimension
+        self.precursor_dimension = precursor_dimension
         
         ############
         # Position #
@@ -370,11 +394,11 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         logits = self.get_logits(output['final']) # bs, sl, predcats
         final = logits.argmax(dim=-1)
         
-        return_ = final, logits
-        if save_xcur: 
-            return_ = return_ + (output['xcur_save'],)
-        if save_xstart: 
-            return_ = return_ + (output['xstart_save'],)
+        return_ = {'prediction': final, 'logits': logits}
+        if save_xcur:
+            return_['xcur'] = output['xcur_save']
+        if save_xstart:
+            return_['xstart'] = output['xstart_save']
 
         return return_
 
@@ -498,4 +522,5 @@ class MDLMDecoder(base_diffusion_decoder):
             'mass': batch['mass'] if 'mass' in batch else None,
         }
         out, logits = self.diff_obj._sample(model_kwargs=model_kwargs)
-        return out, logits
+        return_ = {'prediction': out, 'logits': logits}
+        return return_

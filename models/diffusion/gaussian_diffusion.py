@@ -1220,8 +1220,8 @@ class GaussianDiffusion:
         if save_xcur: xcur_save[-1] = final['sample']
         
         output = {'final': final['sample']}
-        if save_xstart: output['xstart_save'] = xstart_save
-        if save_xcur: output['xcur_save'] = xcur_save
+        if save_xstart: output['xstart_save'] = xstart_save.transpose(0,1)
+        if save_xcur: output['xcur_save'] = xcur_save.transpose(0,1)
         
         return output
 

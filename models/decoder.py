@@ -457,7 +457,7 @@ class DenovoDecoder(nn.Module):
         
         intseq = th.cat([intseq[:, 1:], predictions[:,None]], dim=1)
         
-        return intseq, probs
+        return {'prediction': intseq, 'logits': probs}
 
     def correct_sequence_(self, enc_out, batdic, softmax=False):
         bs = enc_out['emb'].shape[0]
