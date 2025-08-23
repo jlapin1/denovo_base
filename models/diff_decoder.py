@@ -75,28 +75,9 @@ class base_diffusion_decoder(nn.Module):
         self.predcats = len(np.unique(list(self.outdict.values())))
         self.scale = Scale(self.outdict)
 
-        self.dec_config = dec_config
-        RU = dec_config['running_units']
-        self.RU = RU
-        self.input_output_units = input_output_units
-        self.use_mass = dec_config['use_mass']
-        self.use_charge = dec_config['use_charge']
-        self.max_sl = dec_config['sequence_length'] # + 1
-        self.final_down_proj = nn.Sequential(
-            nn.Linear(RU, RU),
-            nn.ReLU(),
-            nn.Linear(RU, input_output_units)
-        )
-        self.output_sigma = output_sigma
-        if output_sigma:
-            self.sigma_down_proj = nn.Sequential(
-                nn.Linear(RU, input_output_units),
-                nn.Identity()
-            )
-        self.self_condition = self_condition
-        self.clip_denoised = clip_denoised
-        self.clamp_denoised = clamp_denoised
-        self.time_dimension = timestep_dimension
+        self.use_mass = use_mass
+        self.use_charge = use_charge
+                
         self.precursor_dimension = precursor_dimension
         
         ############
@@ -453,6 +434,8 @@ class MDLMDecoder(base_diffusion_decoder):
         )
         self.finish_dict(token_dict)
         self.timestep_dimension = timestep_dimension
+        
+        self.max_sl = decoder_config['sequence_length'] # + 1
 
         # Timestep embedding
         self.time_embed = nn.Sequential(
