@@ -294,17 +294,15 @@ class Seq2SeqMDLM(Seq2Seq):
             self.int2mass = {Int: self.str2mass.get(string, 0) for string, Int in self.decoder.outdict.items()}
             self.masses = th.tensor([m[1] for m in sorted(self.int2mass.items())])
     
-    def forward(self, batch, save_x=False, save_p=False, **kwargs):
+    def forward(self, batch, save_x=False, save_p=False, progress=False, **kwargs):
         dictionary = self.encoder_embedding(batch)
         embedding = dictionary['emb']
         spectrum_mask = dictionary['mask']
-        decout = self.decoder.predict_sequence(embedding, batch, save_x=save_x, save_p=save_p)
-        final = decout.pop("prediction")
-        logits = decout.pop("logits")
-        return final, logits
+        decout = self.decoder.predict_sequence(embedding, batch, save_x=save_x, save_p=save_p, progress=progress)
+        return decout
 
-    def predict_sequence(self, batch, save_x=False, save_p=False):
+    def predict_sequence(self, batch, save_x=False, save_p=False, progress=False):
         batch_size, SL = batch['mz'].shape
-        final, logits = self(batch, save_x=save_x, save_p=save_p)
-        return {'prediction': final, 'logits': logits}
+        out = self(batch, save_x=save_x, save_p=save_p, progress=progress)
+        return out
 

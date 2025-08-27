@@ -18,6 +18,7 @@ from torch import Tensor
 import models.mdlm.noise_schedule as noise_schedule
 import models.mdlm.ema as ema
 import models.mdlm.utils as utils
+from tqdm.auto import tqdm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -673,7 +674,7 @@ class Diffusion:#(L.LightningModule):
     return x
 
   @torch.no_grad()
-  def _sample(self, num_steps=None, eps=1e-5, model_kwargs={}, save_x=False, save_p=False):
+  def _sample(self, num_steps=None, eps=1e-5, model_kwargs={}, save_x=False, save_p=False, progress=False):
     """Generate samples from the model."""
     batch_size_per_gpu = len(model_kwargs['charge'])
     if self.parameterization == 'ar':
@@ -690,11 +691,13 @@ class Diffusion:#(L.LightningModule):
     p_x0_cache = None
     
     if save_x: 
-        xsave = th.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=th.int32)
+        xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32)
         xsave[0] = x
     if save_p: 
-        psave = th.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size)
-    for i in range(num_steps):
+        psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size)
+
+    pbar = tqdm(range(num_steps)) if progress else range(num_steps)
+    for i in pbar:
       t = timesteps[i] * torch.ones(
         x.shape[0], 1, device=self.device)
       model_kwargs['timesteps'] = t
