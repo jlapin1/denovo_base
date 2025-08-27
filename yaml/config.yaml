@@ -13,7 +13,7 @@ lr_warmup_steps: 20000 #20000
 # Phase 2 - Flat
 lr_flat_steps: 266000 #266000
 # Phase 3 - Decay
-lr_floor: 5.0e-5
+lr_floor: 1.0e-5
 lr_decay_steps: 1000000
 
 # Loading previous weights

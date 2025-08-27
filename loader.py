@@ -8,6 +8,7 @@ from glob import glob
 import sys
 import pandas as pd
 import numpy as np
+join = os.path.join
 
 def map_fn(example, tokenizer, dic=None, top=100, max_seq=50):
     ab = example['intensity_array']
@@ -87,7 +88,7 @@ class LoaderObj:
         return amod_dic, amod_dic_rev
     
     def create_label_dictionary(self, dataset_path):
-        filepath = os.path.join(dataset_path, "parquet/labeled_sequences/species_list.txt")
+        filepath = join(dataset_path, "parquet/labeled_sequences/species_list.txt")
         List = open(filepath).read().split("\n")
         #tsv = pd.read_csv(filepath, sep='\t', header=None, names=['species_name', 'count'])
         label_dict = {j:i for i,j  in enumerate(List)}
@@ -108,7 +109,7 @@ class LoaderObj:
 
     def load_token_masses(self, masses_path, regex='*masses.tsv'):
         try:
-            masses_path = glob(os.path.join(masses_path, regex))[0]
+            masses_path = glob(join(masses_path, regex))[0]
             mass_frame = pd.read_csv(masses_path, delimiter="\t", header=None)
             massdic = {m:n for m,n in zip(mass_frame[0], mass_frame[1])}
         except:
@@ -117,7 +118,7 @@ class LoaderObj:
         return massdic
 
     def find_set_size_for_tqdm(self, dataset_path, include_name=None, exclude_name=None, regex='*sizes.tsv'):
-        ss_path = os.path.join(dataset_path, regex)
+        ss_path = join(dataset_path, regex)
         ss_path = glob(ss_path)[0]
         if os.path.exists(ss_path):
             split_sizes = pd.read_csv(ss_path, sep="\t", header=None, names=["name", "count"], index_col="name")
@@ -136,15 +137,17 @@ class LoaderObj:
 
         return size
 
-    def _load_dataset(self, dataset_path, include_name=None, exclude_name=None):
+    def _load_dataset(self, dataset_path, include_name=None, exclude_name=None, ext=None):
         regex = "*" if include_name == None else f"*{include_name}*"
-        dataset_path_ = os.path.join(dataset_path, regex)
+        if ext is not None:
+            regex += ext
+        dataset_path_ = join(dataset_path, regex)
         include_files = glob(dataset_path_)
         
         # If the train files cannot be specified without including the val file
         # --> affirmatively exclude it
         if exclude_name is not None:
-            exclude_files = glob(os.path.join(dataset_path, f"*{exclude_name}*"))
+            exclude_files = glob(join(dataset_path, f"*{exclude_name}*"))
             for file in exclude_files:
                 if file in include_files:
                     include_files.remove(file)
@@ -199,8 +202,8 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file that matches the regex *sizes.tsv in the train_dataset_path and val_dataset_path
         #   2. val_name will pick out 1 file's size from the val_dataset_path
-        self.train_size = self.find_set_size_for_tqdm(train_dataset_path, train_name, val_name)
-        self.val_size = self.find_set_size_for_tqdm(val_dataset_path, val_name)
+        self.train_size = self.find_set_size_for_tqdm(train_dataset_path, train_name, val_name, "*species*size*tsv")
+        self.val_size = self.find_set_size_for_tqdm(val_dataset_path, val_name, regex="*species*size*tsv")
         
         ###########
         # Dataset #
@@ -209,8 +212,8 @@ class LoaderHF(LoaderObj):
         #   1. The *_directory_path will contain its data in a directory named "parquet/processed"
         #   2. val_name only has to be somewhere in the filename -> *val_name*
         
-        dataset, train_files = self._load_dataset(os.path.join(train_dataset_path, "parquet/processed"), train_name, val_name)
-        dataset_val, val_files = self._load_dataset(os.path.join(val_dataset_path, "parquet/processed"), val_name)
+        dataset, train_files = self._load_dataset(train_dataset_path, train_name, val_name, ext='parquet')
+        dataset_val, val_files = self._load_dataset(val_dataset_path, val_name)
 
         print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
         print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
@@ -325,7 +328,7 @@ class LoaderCls(LoaderObj):
         self.tokenizer = self.create_tokenizer(tokenizer_path)
 
         # Load dataset
-        data_files = os.path.join(dataset_path, "parquet/labeled_sequences", "*parquet")
+        data_files = join(dataset_path, "parquet/labeled_sequences", "*parquet")
         dataset = load_dataset(
             'parquet',
             data_files=data_files,
