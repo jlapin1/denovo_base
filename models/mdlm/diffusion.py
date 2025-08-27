@@ -673,7 +673,7 @@ class Diffusion:#(L.LightningModule):
     return x
 
   @torch.no_grad()
-  def _sample(self, num_steps=None, eps=1e-5, model_kwargs={}):
+  def _sample(self, num_steps=None, eps=1e-5, model_kwargs={}, save_x=False, save_p=False):
     """Generate samples from the model."""
     batch_size_per_gpu = len(model_kwargs['charge'])
     if self.parameterization == 'ar':
@@ -688,7 +688,12 @@ class Diffusion:#(L.LightningModule):
       1, eps, num_steps + 1, device=self.device)
     dt = (1 - eps) / num_steps
     p_x0_cache = None
-
+    
+    if save_x: 
+        xsave = th.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=th.int32)
+        xsave[0] = x
+    if save_p: 
+        psave = th.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size)
     for i in range(num_steps):
       t = timesteps[i] * torch.ones(
         x.shape[0], 1, device=self.device)
@@ -698,11 +703,15 @@ class Diffusion:#(L.LightningModule):
       elif self.sampler == 'ddpm_cache':
         p_x0_cache, x_next = self._ddpm_caching_update(
           x, t, dt, p_x0=p_x0_cache, model_kwargs=model_kwargs)
+        if save_p: 
+            psave[i] = p_x0_cache
         if (not torch.allclose(x_next, x)
             or self.time_conditioning):
           # Disable caching
           p_x0_cache = None
         x = x_next
+        if save_x: 
+            xsave[i+1] = x
       else:
         x = self._analytic_update(x, t, dt)
 
@@ -715,8 +724,14 @@ class Diffusion:#(L.LightningModule):
         sigma_t = self.noise(t)[0]
         x, logits = self.forward(x, sigma_t, model_kwargs, return_logits=True)
         x = x.argmax(dim=-1)
+
+    output = {'prediction': x, 'logits': logits}
+    if save_x:
+        output['x_save'] = xsave
+    if save_p:
+        output['p_save'] = psave
     
-    return x, logits
+    return output
 
   def restore_model_and_sample(self, num_steps, eps=1e-5):
     """Generate samples from the model."""
@@ -887,7 +902,7 @@ class Diffusion:#(L.LightningModule):
     xt = self.q_xt(x0, move_chance)
     model_output = backbone(xt, **model_kwargs)
     utils.print_nans(model_output, 'model_output')
-    return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index
+    return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index, t
     
     if self.parameterization == 'sedd':
       return dsigma[:, None] * self._score_entropy(

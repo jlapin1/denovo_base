@@ -777,10 +777,11 @@ class DenovoMDLMObj(BaseDenovo):
         }"""
         diff_config = config['decoder_mdlm']['diffusion_config']
         self.max_length = diff_config['model']['length']
+        self.steps = diff_config['sampling']['steps']
         config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
-        self.diff_config = config['decoder_diff']['diffusion_config']
+        self.diff_config = diff_config
         self.model = Seq2SeqMDLM(
             encoder_config = config['encoder_dict'],
             decoder_config = config['decoder_diff']['model_config'],
@@ -790,6 +791,7 @@ class DenovoMDLMObj(BaseDenovo):
             token_dict = self.data.amod_dic,
             masses_path = config['loader']['masses_path'],
         )
+        self.initialize_token_loss()
         
         # Moving average of weights
         import models.mdlm.ema as ema
@@ -816,6 +818,10 @@ class DenovoMDLMObj(BaseDenovo):
             U.optimizer_to(self.opt, device)
         
         self.model.to(device)
+
+    def initialize_token_loss(self):
+        self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
+        self.token_count = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
 
     def inptarg(self, batch):
         bs, sl = batch['intseq'].shape
@@ -849,9 +855,15 @@ class DenovoMDLMObj(BaseDenovo):
         }
 
         backbone = self.model.decoder
-        loss, weights, masked_token_mask = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
+        loss, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
         
-        loss = F.cross_entropy(loss.transpose(-1,-2), target, reduction='none')[masked_token_mask]
+        loss = F.cross_entropy(loss.transpose(-1,-2), target, reduction='none')
+        # Logging token loss
+        discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
+        self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)
+        self.token_count[discrete_timesteps, :loss_mask.shape[1]] += (masked_token_mask & loss_mask).int()
+        #
+        loss = loss[masked_token_mask]
         token_nll = loss.mean()
         #nll = loss * loss_mask
         #count = loss_mask.sum()
@@ -871,6 +883,13 @@ class DenovoMDLMObj(BaseDenovo):
             'Global step': self.global_step,
             "Global grad norm": grad_norm,
         })
+
+    def on_train_epoch_end(self):
+        if self.log:
+            avg_loss = self.token_loss / (self.token_count+1e-5)
+            avg_loss = avg_loss.cpu().detach().numpy()
+            np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
+            self.initialize_token_loss()
 
 if __name__ == '__main__':
     
