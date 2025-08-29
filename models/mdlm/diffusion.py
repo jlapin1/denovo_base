@@ -31,6 +31,15 @@ def _sample_categorical(categorical_probs):
     - (torch.rand_like(categorical_probs) + 1e-10).log())
   return (categorical_probs / gumbel_norm).argmax(dim=-1)
 
+def _sample_top_categorical(categorical_probs, top=2):
+    sorted_probs, sorted_inds = categorical_probs.sort(-1)
+    sorted_probs_ = sorted_probs[..., -top:]
+    gumbel_norm = (
+        1e-10 - (torch.rand_like(sorted_probs_) + 1e-10).log()
+    )
+    winner = (sorted_probs_ / gumbel_norm).argmax(dim=-1)
+    output = sorted_inds[...,-top:].gather(-1, winner[:,:,None]).squeeze()
+    return output
 
 def _unsqueeze(x, reference):
   return x.view(
@@ -622,9 +631,10 @@ class Diffusion:#(L.LightningModule):
       p_x0 = self.forward(x, sigma_t, model_kwargs).exp()
     
     assert move_chance_t.ndim == p_x0.ndim
-    q_xs = p_x0 * (move_chance_t - move_chance_s)
+    q_xs = p_x0 * (move_chance_t - move_chance_s) * self.config['sampling']['move_chance_multiplier']
     q_xs[:, :, self.mask_index] = move_chance_s[:, :, 0]
-    _x = _sample_categorical(q_xs)
+    sampler = _sample_top_categorical if self.config['sampling']['top'] else _sample_categorical
+    _x = sampler(q_xs)
     
     copy_flag = (x != self.mask_index).to(x.dtype)
     return p_x0, copy_flag * x + (1 - copy_flag) * _x
@@ -730,9 +740,9 @@ class Diffusion:#(L.LightningModule):
 
     output = {'prediction': x, 'logits': logits}
     if save_x:
-        output['x_save'] = xsave
+        output['x_save'] = xsave.transpose(0,1)
     if save_p:
-        output['p_save'] = psave
+        output['p_save'] = psave.transpose(0,1)
     
     return output
 
