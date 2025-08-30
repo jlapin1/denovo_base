@@ -78,7 +78,7 @@ class Perplexity(NLL):
     return torch.exp(self.mean_value / self.weight)
 
 
-class Diffusion:#(L.LightningModule):
+class Diffusion:
   def __init__(
       self,
       config,
@@ -86,24 +86,15 @@ class Diffusion:#(L.LightningModule):
       backbone,
       tokenizer=None,
   ):
-    #super().__init__()
-    #self.save_hyperparameters()
     self.config = config
 
     self.tokenizer = tokenizer
-    self.vocab_size = len(dictionary)#self.tokenizer.vocab_size
+    self.vocab_size = len(dictionary)
     self.sampler = self.config['sampling']['predictor']
-    """self.gen_ppl_eval_model_name_or_path = self.config.eval.\
-      gen_ppl_eval_model_name_or_path"""
     self.antithetic_sampling = self.config['training']['antithetic_sampling']
     self.importance_sampling = self.config['training']['importance_sampling']
     self.change_of_variables = self.config['training']['change_of_variables']
-    """if (not hasattr(self.tokenizer, 'mask_token')
-        or self.tokenizer.mask_token is None):
-      self.mask_index = mask_index
-      #self.vocab_size += 1
-    else:
-      self.mask_index = self.tokenizer.mask_token_id"""
+    
     self.mask_index = dictionary['<MASK>']
     self.bos_token_id = dictionary['<SOS>']
     self.eos_token_id = dictionary['<EOS>']
@@ -111,54 +102,16 @@ class Diffusion:#(L.LightningModule):
     
     self.backbone = backbone
     self.device = device
-    """
-    if self.config.backbone == 'dit':
-      self.backbone = models.dit.DIT(
-        self.config, vocab_size=self.vocab_size)
-    elif self.config.backbone == 'dimamba':
-      self.backbone = models.dimamba.DiMamba(
-        self.config,
-        vocab_size=self.vocab_size,
-        pad_token_id=self.tokenizer.pad_token_id)
-    elif self.config.backbone == 'ar':
-      self.backbone = models.autoregressive.AR(
-        self.config,
-        vocab_size=self.vocab_size,
-        mask_index=self.mask_index)
-    elif self.config.backbone == 'hf_dit':
-      self.backbone = transformers.AutoModelForMaskedLM.from_pretrained(
-        config.eval.checkpoint_path, trust_remote_code=True)
-    else:
-      raise ValueError(
-        f'Unknown backbone: {self.config.backbone}')
-    """
 
     self.T = self.config['T']
     self.subs_masking = self.config['subs_masking']
+    self.SL = self.config['model']['length']
+    self.steps = self.config['sampling']['steps']
 
     self.softplus = torch.nn.Softplus()
-    # metrics are automatically reset at end of epoch
-    metrics = torchmetrics.MetricCollection({
-      'nll': NLL(),
-      'bpd': BPD(),
-      'ppl': Perplexity(),
-    })
-    metrics.set_dtype(torch.float64)
-    self.train_metrics = metrics.clone(prefix='train/')
-    self.valid_metrics = metrics.clone(prefix='val/')
-    self.test_metrics = metrics.clone(prefix='test/')
+    self.eval_model_tokenizer = None
 
-    # generative perplexity
-    self.gen_ppl_metric = Perplexity()
-    self.eval_model_tokenizer = None #transformers.AutoTokenizer.from_pretrained(self.gen_ppl_eval_model_name_or_path)
-    """if self.eval_model_tokenizer.pad_token is None:
-      self.eval_model_tokenizer.pad_token =\
-          self.eval_model_tokenizer.eos_token
-      self.eval_model_tokenizer.pad_token_id =\
-          self.eval_model_tokenizer.eos_token_id"""
-
-    self.noise = noise_schedule.get_noise(self.config,
-                                          dtype=torch.float32)
+    self.noise = noise_schedule.get_noise(self.config, dtype=torch.float32)
     """if self.config['training']['ema'] > 0:
       self.ema = ema.ExponentialMovingAverage(
         itertools.chain(self.backbone.parameters(),
@@ -684,67 +637,77 @@ class Diffusion:#(L.LightningModule):
     return x
 
   @torch.no_grad()
-  def _sample(self, num_steps=None, eps=1e-5, model_kwargs={}, save_x=False, save_p=False, progress=False):
-    """Generate samples from the model."""
-    batch_size_per_gpu = len(model_kwargs['charge'])
-    if self.parameterization == 'ar':
-      return self._ar_sampler(batch_size_per_gpu)
-    # Lightning auto-casting is not working in this method for some reason
-    if num_steps is None:
-      num_steps = self.config['sampling']['steps']
-    x = self._sample_prior(
-      batch_size_per_gpu,
-      self.config['model']['length']).to(self.device)
-    timesteps = torch.linspace(
-      1, eps, num_steps + 1, device=self.device)
-    dt = (1 - eps) / num_steps
-    p_x0_cache = None
-    
-    if save_x: 
-        xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32)
-        xsave[0] = x
-    if save_p: 
-        psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size)
-
-    pbar = tqdm(range(num_steps)) if progress else range(num_steps)
-    for i in pbar:
-      t = timesteps[i] * torch.ones(
-        x.shape[0], 1, device=self.device)
-      model_kwargs['timesteps'] = t
-      if self.sampler == 'ddpm':
-        x = self._ddpm_update(x, t, dt, model_kwargs)
-      elif self.sampler == 'ddpm_cache':
-        p_x0_cache, x_next = self._ddpm_caching_update(
-          x, t, dt, p_x0=p_x0_cache, model_kwargs=model_kwargs)
-        if save_p: 
-            psave[i] = p_x0_cache
-        if (not torch.allclose(x_next, x)
-            or self.time_conditioning):
-          # Disable caching
-          p_x0_cache = None
-        x = x_next
-        if save_x: 
-            xsave[i+1] = x
-      else:
-        x = self._analytic_update(x, t, dt)
-
-    if self.config['sampling']['noise_removal']:
-      t = timesteps[-1] * torch.ones(x.shape[0], 1,
-                                     device=self.device)
-      if self.sampler == 'analytic':
-        x = self._denoiser_update(x, t, model_kwargs)
-      else:
-        sigma_t = self.noise(t)[0]
-        x, logits = self.forward(x, sigma_t, model_kwargs, return_logits=True)
-        x = x.argmax(dim=-1)
-
-    output = {'prediction': x, 'logits': logits}
-    if save_x:
-        output['x_save'] = xsave.transpose(0,1)
-    if save_p:
-        output['p_save'] = psave.transpose(0,1)
-    
-    return output
+  def _sample(
+      self, 
+      num_steps=None, 
+      eps=1e-5, 
+      model_kwargs={}, 
+      save_x=False, 
+      save_p=False, 
+      progress=False
+  ):
+      """Generate samples from the model."""
+      batch_size_per_gpu = len(model_kwargs['charge'])
+      
+      if self.parameterization == 'ar':
+          return self._ar_sampler(batch_size_per_gpu)
+      
+      if num_steps is None:
+          num_steps = self.steps
+      
+      # Initialize variables
+      x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
+      timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
+      dt = (1 - eps) / num_steps
+      p_x0_cache = None
+      if save_x:
+          xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32)
+          xsave[0] = x
+      if save_p: 
+          psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size)
+      
+      # Sampling loops
+      pbar = tqdm(range(num_steps)) if progress else range(num_steps)
+      for i in pbar:
+          t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
+          model_kwargs['timesteps'] = t
+          
+          if self.sampler == 'ddpm':
+              x = self._ddpm_update(x, t, dt, model_kwargs)
+          elif self.sampler == 'ddpm_cache':
+              p_x0_cache, x_next = self._ddpm_caching_update(
+                  x, t, dt, p_x0=p_x0_cache, model_kwargs=model_kwargs
+              )
+           
+          if save_p: 
+              psave[i] = p_x0_cache
+          if (not torch.allclose(x_next, x) or self.time_conditioning):
+              # Disable caching
+              p_x0_cache = None
+              x = x_next
+          else:
+              x = self._analytic_update(x, t, dt)
+          if save_x: 
+              xsave[i+1] = x
+      
+      # Final decisions
+      if self.config['sampling']['noise_removal']:
+          t = timesteps[-1] * torch.ones(x.shape[0], 1, device=self.device)
+          if self.sampler == 'analytic':
+              x = self._denoiser_update(x, t, model_kwargs)
+          else:
+              sigma_t = self.noise(t)[0]
+              x, logits = self.forward(x, sigma_t, model_kwargs, return_logits=True)
+              x = x.argmax(dim=-1)
+      
+      # Output
+      output = {'prediction': x, 'logits': logits}
+      if save_x:
+          output['x_save'] = xsave.transpose(0,1)
+      if save_p:
+          output['p_save'] = psave.transpose(0,1)
+      
+      return output
 
   def restore_model_and_sample(self, num_steps, eps=1e-5):
     """Generate samples from the model."""
