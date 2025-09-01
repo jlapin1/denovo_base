@@ -176,6 +176,8 @@ class LoaderHF(LoaderObj):
         num_workers: int=0,
         **kwargs
     ):
+        path_ext = "parquet/processed"
+
         if val_dataset_path is None:
             val_dataset_path = train_dataset_path
         if masses_path is None:
@@ -212,8 +214,8 @@ class LoaderHF(LoaderObj):
         #   1. The *_directory_path will contain its data in a directory named "parquet/processed"
         #   2. val_name only has to be somewhere in the filename -> *val_name*
         
-        dataset, train_files = self._load_dataset(train_dataset_path, train_name, val_name, ext='parquet')
-        dataset_val, val_files = self._load_dataset(val_dataset_path, val_name)
+        dataset, train_files = self._load_dataset(join(train_dataset_path, path_ext), train_name, val_name, ext='parquet')
+        dataset_val, val_files = self._load_dataset(join(val_dataset_path, path_ext), val_name)
 
         print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
         print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
