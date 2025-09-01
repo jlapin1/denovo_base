@@ -255,6 +255,11 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         self.use_charge = use_charge
         self.max_sl = dec_config['sequence_length']# + 1
         self.final_down_proj = nn.Linear(RU, input_output_units)
+        self.final_down_proj = nn.Sequential(
+            nn.Linear(RU, RU),
+            nn.ReLU(),
+            nn.Linear(RU, input_output_units)
+        )
         self.output_sigma = output_sigma
         if output_sigma:
             self.sigma_down_proj = nn.Sequential(
