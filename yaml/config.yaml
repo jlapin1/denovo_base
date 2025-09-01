@@ -21,11 +21,11 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: True
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -189,6 +189,7 @@ decoder_mdlm:
       exponent: 1.5
     model:
       length: 41
+      self_condition: True
 
 # Leaving ckpt empty deactivate classifier guided diffusion
 classifier_config:

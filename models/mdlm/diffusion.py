@@ -285,7 +285,7 @@ class Diffusion:
     assert sigma.ndim == 1, sigma.shape
     return sigma
 
-  def forward(self, x, sigma, model_kwargs={}, return_logits=False):
+  def forward(self, x, sigma, model_kwargs={}):
     """Returns log score."""
     sigma = self._process_sigma(sigma)
     model_kwargs['timesteps'] = sigma
@@ -293,12 +293,9 @@ class Diffusion:
       logits = self.backbone(x, **model_kwargs)
     
     if self.parameterization == 'subs':
-      out = self._subs_parameterization(logits=logits,
+      out = self._subs_parameterization(logits=logits.clone(),
                                          xt=x)
-      if return_logits:
-          return out, logits
-      else:
-          return out
+      return out, logits
 
     elif self.parameterization == 'sedd':
       return self._sedd_parameterization(logits=logits,
@@ -306,7 +303,8 @@ class Diffusion:
                                          sigma=sigma)
     elif self.parameterization == 'd3pm':
       return self._d3pm_parameterization(logits=logits)
-    return logits
+    
+    return logits, None
 
   def _d3pm_loss(self, model_output, xt, x0, t):
     dt = 1 / self.T
@@ -581,7 +579,8 @@ class Diffusion:
     move_chance_s = (t - dt)[:, None, None]
     assert move_chance_t.ndim == 3, move_chance_t.shape
     if p_x0 is None:
-      p_x0 = self.forward(x, sigma_t, model_kwargs).exp()
+      logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
+      p_x0 = logp_x0.exp()
     
     assert move_chance_t.ndim == p_x0.ndim
     q_xs = p_x0 * (move_chance_t - move_chance_s) * self.config['sampling']['move_chance_multiplier']
@@ -590,7 +589,7 @@ class Diffusion:
     _x = sampler(q_xs)
     
     copy_flag = (x != self.mask_index).to(x.dtype)
-    return p_x0, copy_flag * x + (1 - copy_flag) * _x
+    return p_x0, copy_flag * x + (1 - copy_flag) * _x, logits
 
   def _ddpm_update(self, x, t, dt, model_kwargs={}):
     sigma_t, _ = self.noise(t)
@@ -660,6 +659,10 @@ class Diffusion:
       timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
       dt = (1 - eps) / num_steps
       p_x0_cache = None
+      if self.config['model']['self_condition']:
+          model_kwargs['self_conditions'] = torch.zeros(
+              batch_size_per_gpu, self.SL, self.vocab_size, device=self.device
+          )
       if save_x:
           xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32)
           xsave[0] = x
@@ -675,9 +678,11 @@ class Diffusion:
           if self.sampler == 'ddpm':
               x = self._ddpm_update(x, t, dt, model_kwargs)
           elif self.sampler == 'ddpm_cache':
-              p_x0_cache, x_next = self._ddpm_caching_update(
+              p_x0_cache, x_next, logits = self._ddpm_caching_update(
                   x, t, dt, p_x0=p_x0_cache, model_kwargs=model_kwargs
               )
+              if self.config['model']['self_condition']:
+                  model_kwargs['self_conditions'] = logits
            
           if save_p: 
               psave[i] = p_x0_cache
@@ -697,7 +702,7 @@ class Diffusion:
               x = self._denoiser_update(x, t, model_kwargs)
           else:
               sigma_t = self.noise(t)[0]
-              x, logits = self.forward(x, sigma_t, model_kwargs, return_logits=True)
+              x, logits = self.forward(x, sigma_t, model_kwargs)
               x = x.argmax(dim=-1)
       
       # Output
@@ -874,8 +879,16 @@ class Diffusion:
       sigma, dsigma = self.noise(t)
       model_kwargs['timesteps'] = sigma if self.time_conditioning else torch.zeros_like(sigma)
       move_chance = 1 - torch.exp(-sigma[:, None])
-
+    
     xt = self.q_xt(x0, move_chance)
+
+    if self.config['model']['self_condition']:
+        model_kwargs['self_conditions'] = torch.zeros(x0.shape[0], x0.shape[1], self.vocab_size, device=device)
+        if np.random.uniform() > 0.5:
+            with torch.no_grad():
+                model_output = backbone(xt, **model_kwargs)
+            model_kwargs['self_conditions'] = model_output.detach()
+    
     model_output = backbone(xt, **model_kwargs)
     utils.print_nans(model_output, 'model_output')
     return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index, t

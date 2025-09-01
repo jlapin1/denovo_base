@@ -434,7 +434,8 @@ class MDLMDecoder(base_diffusion_decoder):
         )
         self.finish_dict(token_dict)
         self.timestep_dimension = timestep_dimension
-        
+        self.self_condition = self_condition
+
         self.max_sl = decoder_config['sequence_length'] # + 1
 
         # Timestep embedding
@@ -445,8 +446,10 @@ class MDLMDecoder(base_diffusion_decoder):
         )
         
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
-        x_input_dim = 2*self.predcats if self_condition else self.predcats
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
+        if self_condition:
+            self.embed_self_conditions = nn.Linear(self.predcats, running_units)
+        
         self.proj_begin = nn.Sequential(
             nn.Linear(running_units, running_units),
             nn.LayerNorm(running_units),
@@ -480,6 +483,8 @@ class MDLMDecoder(base_diffusion_decoder):
 
         # Beginning
         seq_emb = self.embed_sequence(x)
+        if self.self_condition:
+            seq_emb += self.embed_self_conditions(self_conditions)
         emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass) # position added inside
         emb = self.proj_begin(emb)
         

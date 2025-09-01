@@ -743,45 +743,18 @@ class DenovoMDLMObj(BaseDenovo):
         self.training_loss_keys.extend(['loss'])
 
         from models.seq2seq import Seq2SeqMDLM
-        """diff_config = {
-            'T': 0,
-            'subs_masking': False,
-            'parameterization': 'subs',
-            'time_conditioning': True,
-            'sampling': {
-                'predictor': 'ddpm_cache',
-                'steps': 128,
-                'noise_removal': True,
-                'semi_ar': False,
-                'stride_length': 1,
-                'num_strides': 1,
-            },
-            'eval': {
-            },
-            'training': {
-                'ema': 0.9999,
-                'antithetic_sampling': True,
-                'importance_sampling': False,
-                'sampling_eps': 1e-3,
-                'change_of_variables': False,
-            },
-            'noise': {
-                'type': 'loglinear',
-                'sigma_min': 1e-4,
-                'sigma_max': 20,
-                'exponent': 1.5,
-            },
-            'model': {
-                'length': 40+1,
-            }
-        }"""
+        
         diff_config = config['decoder_mdlm']['diffusion_config']
+        self.diff_config = diff_config
         self.max_length = diff_config['model']['length']
         self.steps = diff_config['sampling']['steps']
         config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
         config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
         config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
-        self.diff_config = diff_config
+        
+        # The diffusion models share the model_config, but with a la carte alterations
+        config['decoder_diff']['model_config']['self_condition'] = diff_config['model']['self_condition']
+        
         self.model = Seq2SeqMDLM(
             encoder_config = config['encoder_dict'],
             decoder_config = config['decoder_diff']['model_config'],
