@@ -8,7 +8,7 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 2.5e-4 # phase 2 LR
+lr_warmup_end: 1.5e-4 # phase 2 LR
 lr_warmup_steps: 20000 #20000
 # Phase 2 - Flat
 lr_flat_steps: 266000 #266000
@@ -54,7 +54,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -160,6 +160,36 @@ decoder_diff:
   ensemble:
     ensemble_n: 1
     mass_tol: 1e-2
+decoder_mdlm:
+  diffusion_config:
+    T: 0
+    subs_masking: False
+    parameterization: subs
+    time_conditioning: True
+    sampling:
+      predictor: ddpm_cache
+      steps: 128
+      top: True
+      move_chance_multiplier: 1.0
+      noise_removal: True
+      semi_ar: False
+      stride_length: 1
+      num_strides: 1
+    eval:
+    training:
+      ema: 0.9999
+      antithetic_sampling: True
+      importance_sampling: False
+      sampling_eps: 1.0e-3
+      change_of_variables: False
+    noise:
+      type: loglinear
+      sigma_min: 1.0e-4
+      sigma_max: 20
+      exponent: 1.5
+    model:
+      length: 41
+      self_condition: True
 
 # Leaving ckpt empty deactivate classifier guided diffusion
 classifier_config:

@@ -87,8 +87,10 @@ class BaseDenovo:
             batch_size=config['batch_size'],
             **self.config['loader']
         )
-
+        
+        self.training_loss_keys = []
         self.eval_stats = []
+        self.eval_kwargs = {}
 
     def save_weights(self, fp='./model.wts'):
         th.save(self.model.state_dict(), fp)
@@ -401,6 +403,16 @@ class BaseDenovo:
                         schema_defined = True
                     writer.write_table(table)
                     dataframe = initial_dataframe()
+
+            # Add to totals
+            for metric in dn_metrics['sum'].keys():
+                if metric not in tots['sum'].keys():
+                    tots['sum'][metric] = 0
+                    tots['total'][metric] = 0
+                tots['sum'][metric] += dn_metrics['sum'][metric]
+                tots['total'][metric] += dn_metrics['total'][metric]
+
+            self.on_eval_step_end(target, loss_mask)
         
         steps = i+1
         totsz = self.config['batch_size']*steps
@@ -476,7 +488,6 @@ class BaseDenovo:
 
     def on_eval_end(self, *args, **kwargs):
         pass
-
 
 class DenovoArDSObj(BaseDenovo):
     def __init__(self, config, svdir='./dswts/', rddir=None):
@@ -635,7 +646,7 @@ class DenovoDiffusionObj(BaseDenovo):
     def inptarg(self, batch):
         
         bs, sl = batch['intseq'].shape
-        dec_input = deepcopy(batch['intseq'])
+        #dec_input = deepcopy(batch['intseq'])
         target = deepcopy(batch['intseq'])
 
         #batch['mass'] = batch['mass'] * batch['charge'] # For MKB trained model
@@ -722,7 +733,151 @@ class DenovoDiffusionObj(BaseDenovo):
     def on_eval_end(self):
         pass
 
+class DenovoMDLMObj(BaseDenovo):
+    def __init__(self, config, svdir='./save/', rddir=None):
+        super().__init__(
+            config=config, 
+            svdir=svdir,
+            rddir=rddir,
+        )
+        self.training_loss_keys.extend(['loss'])
+
+        from models.seq2seq import Seq2SeqMDLM
+        
+        diff_config = config['decoder_mdlm']['diffusion_config']
+        self.diff_config = diff_config
+        self.max_length = diff_config['model']['length']
+        self.steps = diff_config['sampling']['steps']
+        config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
+        config['decoder_diff']['diffusion_config']['resume_checkpoint'] = False
+        config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
+        
+        # The diffusion models share the model_config, but with a la carte alterations
+        config['decoder_diff']['model_config']['self_condition'] = diff_config['model']['self_condition']
+        
+        self.model = Seq2SeqMDLM(
+            encoder_config = config['encoder_dict'],
+            decoder_config = config['decoder_diff']['model_config'],
+            diff_config = diff_config,
+            top_peaks = config['top_peaks'], 
+            max_peptide_length = config['pep_length'][1], 
+            token_dict = self.data.amod_dic,
+            masses_path = config['loader']['masses_path'],
+        )
+        self.initialize_token_loss()
+        
+        # Moving average of weights
+        import models.mdlm.ema as ema
+        import itertools
+        if diff_config['training']['ema'] > 0:
+            self.ema = ema.ExponentialMovingAverage(
+                itertools.chain(
+                    self.model.encoder.parameters(),
+                    self.model.decoder.parameters(),
+                    self.model.diff_obj.noise.parameters(),
+                ),
+                decay=diff_config['training']['ema']
+            )
+        
+        # Optimizer
+        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+        self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
+        
+        # loading previous weights
+        if config['prev_wts'] is not None:
+            retain = False if config['load_last'] else True
+            self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
+            self.load_saved_weights(self.opt, "opt", config['load_last'])
+            U.optimizer_to(self.opt, device)
+        
+        self.model.to(device)
+
+    def initialize_token_loss(self):
+        self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
+        self.token_count = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
+
+    def inptarg(self, batch):
+        bs, sl = batch['intseq'].shape
+
+        #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
+        
+        target = deepcopy(batch['intseq'])
+        target = self.model.decoder.append_null_token(target)
+        target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
+        
+        loss_mask = self.model.decoder.sequence_mask(target)
+
+        return None, target, loss_mask
+
+    def train_step(self, batch):
+        batch = U.Dict2dev(batch, device)
+        _, target, loss_mask = self.inptarg(batch)
+        
+        self.model.to(device)
+        self.model.train()
+        self.model.zero_grad()
+        
+        embedding = self.model.encoder_embedding(batch)
+        
+        model_kwargs = {
+            #'input_ids': None,
+            #'decoder_input_ids': target,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+            'kv_features': embedding['emb'],
+        }
+
+        backbone = self.model.decoder
+        loss, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
+        
+        loss = F.cross_entropy(loss.transpose(-1,-2), target, reduction='none')
+        # Logging token loss
+        discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
+        self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)
+        self.token_count[discrete_timesteps, :loss_mask.shape[1]] += (masked_token_mask & loss_mask).int()
+        #
+        loss = loss[masked_token_mask]
+        token_nll = loss.mean()
+        #nll = loss * loss_mask
+        #count = loss_mask.sum()
+        #batch_nll = nll.sum()
+        #token_nll = batch_nll / count
+        losses = {'loss': token_nll}
+        
+        token_nll.backward()
+        self.update_lr()
+        self.opt.step()
+
+        return losses
+    
+    def log_wandb(self, losses, grad_norm):
+        wandb.log({
+            "Total loss": losses['loss'],
+            'Global step': self.global_step,
+            "Global grad norm": grad_norm,
+        })
+
+    def on_train_epoch_end(self):
+        if self.log:
+            avg_loss = self.token_loss / (self.token_count+1e-5)
+            avg_loss = avg_loss.cpu().detach().numpy()
+            np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
+            self.initialize_token_loss()
+
 if __name__ == '__main__':
+    
+    ##############
+    # Read yamls #
+    ##############
+
+    #######################
+    # Configuration files #
+    #######################
+
+    if len(sys.argv) > 1:
+        config_path = sys.argv[1]
+    else:
+        config_path = "./yaml/config.yaml"
 
     #######################
     # Configuration files #
@@ -792,6 +947,9 @@ if __name__ == '__main__':
     if 'diff' in config['decoder_name']:
         print("<DSCOMMENT> Using diffusion decoder")
         D = DenovoDiffusionObj(config, svdir=svdir, rddir=rddir)
+    elif 'mdlm' in config['decoder_name']:
+        print("<DSCOMMENT> Using masked diffusion language decoder")
+        D = DenovoMDLMObj(config, svdir=svdir, rddir=rddir)
     else:
         print("<DSCOMMENT> Using autoregressive decoder")
         D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)

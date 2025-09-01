@@ -1,9 +1,10 @@
 import torch as th
 from torch import nn
 from models.encoder import Encoder
-from models.diff_decoder import DenovoDiffusionDecoder
+from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
+from models.mdlm.diffusion import Diffusion as MDLMDiffusion
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -208,6 +209,7 @@ class Seq2SeqDiff(Seq2Seq):
             additional_outputs = (xcur, xstart)
         elif len(diffout) == 3:
             seqs, logits, xcurstart = diffout
+
             if entropy:
                 logits = self.calculate_entropy(xcurstart)
                 additional_outputs = ()
@@ -250,10 +252,57 @@ class Seq2SeqDiff(Seq2Seq):
         assert len(winners) == bs
         top_sequences = seqs[winners]
         logits = logits[winners]
-        
-        # Additional outputs
         additional_outputs = {x: y[winners] for x,y in diffout.items()}
 
         return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
-        return return_
+        return return_       
+
+class Seq2SeqMDLM(Seq2Seq):
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+        )
+        # Decoder model
+        decoder_config['kv_indim'] = self.encoder.run_units
+        self.decoder = MDLMDecoder(
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            **decoder_config,
+        )
+        # Diffusion object
+        self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict, self.decoder)
+        self.decoder.diff_obj = self.diff_obj
+
+        # Scale
+        if 'masses_path' in kwargs:
+            path = os.path.join(kwargs['masses_path'], 'masses.tsv')
+            self.str2mass = {
+                m.split()[0]: float(m.split()[1]) 
+                for m in open(path)
+                .read().strip().split("\n")
+            }
+            self.int2mass = {Int: self.str2mass.get(string, 0) for string, Int in self.decoder.outdict.items()}
+            self.masses = th.tensor([m[1] for m in sorted(self.int2mass.items())])
+    
+    def forward(self, batch, save_x=False, save_p=False, progress=False, **kwargs):
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        spectrum_mask = dictionary['mask']
+        decout = self.decoder.predict_sequence(embedding, batch, save_x=save_x, save_p=save_p, progress=progress)
+        return decout
+
+    def predict_sequence(self, batch, save_x=False, save_p=False, progress=False):
+        batch_size, SL = batch['mz'].shape
+        out = self(batch, save_x=save_x, save_p=save_p, progress=progress)
+        return out
 

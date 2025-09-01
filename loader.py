@@ -279,7 +279,7 @@ class LoaderHF(LoaderObj):
             )
         
         # Chimeric
-        #dataset = dataset.filter(lambda example: example['chimeric'])
+        dataset = dataset.filter(lambda example: ~example['chimeric'])
 
         # Filter val set for dispersed examples
         if 'val_steps' in kwargs.keys():

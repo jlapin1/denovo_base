@@ -43,78 +43,55 @@ def init_decoder_weights(module):
         if module.bias is not None:
             module.bias = I.zeros_(module.bias)
 
-class DenovoDiffusionDecoder(nn.Module):
-    def __init__(self,
+class base_diffusion_decoder(nn.Module):
+    def __init__(self, 
         token_dict,
-        dec_config,
-        diff_obj,
-        input_output_units=128,
         running_units=512,
         d=64,
         h=8,
+        ffn_multiplier=4,
         dropout=0,
-        unit_multiplier=4,
-        depth=6,
-        timestep_dimension=128,
-        precursor_dimension=128,
         alphabet=False,
-        use_charge=False,
-        use_mass=False,
         prenorm=False,
-        self_condition=True,
-        output_sigma=False,
-        clip_denoised=False,
-        clamp_denoised=False,
-        **kwargs
+        embed_type=None,
+        timestep_dimension=128,
+        kv_input_dimension=128,
+        depth=6,
+        use_charge=True,
+        use_mass=True,
+        precursor_dimension=128,
     ):
-        super(DenovoDiffusionDecoder, self).__init__()
+        super(base_diffusion_decoder, self).__init__()
+        
+        #####################
+        # Output dictionary #
+        #####################
         self.outdict = deepcopy(token_dict)
-        self.inpdict = deepcopy(token_dict)
-        self.diff_obj = diff_obj
         self.NT = self.outdict['X']
-        self.inpdict['<SOS>'] = np.max(list(self.inpdict.values())) + 1
-        self.start_token = self.inpdict['<SOS>']
         self.outdict['<EOS>'] = np.max(list(self.outdict.values())) + 1
         self.EOS = self.outdict['<EOS>']
-
-        dec_config['num_inp_tokens'] = np.max(list(self.inpdict.values())) + 1
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = len(np.unique(list(self.outdict.values())))
         self.scale = Scale(self.outdict)
 
-        self.dec_config = dec_config
-        RU = dec_config['running_units']
-        self.RU = RU
-        self.input_output_units = input_output_units
-        self.use_mass = dec_config['use_mass']
-        self.use_charge = dec_config['use_charge']
-        self.max_sl = dec_config['sequence_length'] # + 1
-        self.final_down_proj = nn.Sequential(
-            nn.Linear(RU, RU),
-            nn.ReLU(),
-            nn.Linear(RU, input_output_units)
-        )
-        self.output_sigma = output_sigma
-        if output_sigma:
-            self.sigma_down_proj = nn.Sequential(
-                nn.Linear(RU, input_output_units),
-                nn.Identity()
-            )
-        self.self_condition = self_condition
-        self.clip_denoised = clip_denoised
-        self.clamp_denoised = clamp_denoised
-        self.time_dimension = timestep_dimension
+        self.use_mass = use_mass
+        self.use_charge = use_charge
+                
         self.precursor_dimension = precursor_dimension
         
-        """Position"""
+        ############
+        # Position #
+        ############
         pos = mp.FourierFeatures(
-            th.arange(100, dtype=th.float32), 1, 1000, self.RU,
+            th.arange(100, dtype=th.float32), 1, 1000, running_units,
         )
         self.pos = nn.Parameter(pos, requires_grad=False)
         self.pos_modulator = nn.Parameter(th.tensor(0.1), requires_grad=True)
-
-        """Precursors"""
+        
+        ##############
+        # Precursors #
+        ##############
         self.use_charge = use_charge
         self.use_mass = use_mass
         self.atleast1 = True if (use_charge or use_mass) else False
@@ -131,24 +108,14 @@ class DenovoDiffusionDecoder(nn.Module):
                     mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
             self.precursor_emb = nn.Sequential(
-                nn.Linear(precursor_dimension*num, self.RU)
+                nn.Linear(precursor_dimension*num, running_units)
             )
         else:
             self.added_tokens = 0
-
-        """
-        Transforming the x input to input for transformer block
-        Note: identity in original paper if no self_condition
-        """
-        # TODO include sigma guess if learned_sigma -> 3*input_output_units
-        x_input_dim = 2*input_output_units if self_condition else input_output_units
-        self.input_proj_dec = nn.Sequential(
-            nn.Linear(x_input_dim, RU),
-            nn.Tanh(),
-            nn.Linear(RU, RU)
-        )
         
-        """Transformer blocks"""
+        ######################
+        # Transformer blocks #
+        ######################
         attention_dict = {
             'indim': running_units, 
             'd': d, 
@@ -158,7 +125,7 @@ class DenovoDiffusionDecoder(nn.Module):
         }
         ffn_dict = {
             'indim': running_units,
-            'unit_multiplier': dec_config['ffn_multiplier'], 
+            'unit_multiplier': ffn_multiplier, 
             'dropout': dropout,
             'alphabet': alphabet,
         }
@@ -168,42 +135,38 @@ class DenovoDiffusionDecoder(nn.Module):
                 ffn_dict, 
                 norm_type='layer', 
                 prenorm=prenorm, 
-                embed_type='preembed',
+                embed_type=embed_type,
                 embed_indim=timestep_dimension,
                 is_cross=True,
-                kvindim=dec_config['kv_indim']
+                kvindim=kv_input_dimension,
             ) 
-            for _ in range(dec_config['depth'])
+            for _ in range(depth)
         ])
 
-        """
-        # The mapping of tokens to embeddings, and reverse, embeddings
-        # to logits will have a shared weight that is only trained by
-        # forward process.
-        """
-        # seq_emb: forward
-        self.seq_emb = nn.Embedding(
-            dec_config['num_inp_tokens'], input_output_units, padding_idx=self.NT
-        )
-        self.seq_emb.weight = I.normal_(self.seq_emb.weight, 0, 0.03)
-        with th.no_grad(): 
-            self.seq_emb.weight[self.NT] = th.zeros_like(self.seq_emb.weight[self.NT])
-        # lm_head: backward
-        self.lm_head = nn.Linear(input_output_units, len(self.outdict))
-        with th.no_grad():
-            self.lm_head.weight = self.seq_emb.weight
+    def total_params(self):
+        return sum([m.numel() for m in self.parameters() if m.requires_grad])
 
-        """Timestep embedding"""
-        self.time_embed = nn.Sequential(
-            nn.Linear(timestep_dimension, timestep_dimension),
-            nn.SiLU(),
-            nn.Linear(timestep_dimension, timestep_dimension)
-        )
+    def append_null_token(self, intseq):
+        bs, sl = intseq.shape
+        nulls = th.fill(th.empty(bs, dtype=th.int64), self.NT).to(intseq.device)
+        out = th.cat([intseq, nulls[:,None]], dim=-1)
+
+        return out
+
+    def replace_with_eos_token(self, intseq, lengths):
+        bs, sl = intseq.shape
+        eos_inds = [th.arange(bs, device=intseq.device), lengths]
+        intseq[eos_inds] = self.EOS
+
+        return intseq
+    
+    def AddPosEmbed(self, seq_emb):
+        return seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
 
     def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None):
         
         # Add position to sequence
-        out = seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
+        out = self.AddPosEmbed(seq_emb)
 
         # charge and/or energy embedding
         if self.atleast1:
@@ -224,6 +187,9 @@ class DenovoDiffusionDecoder(nn.Module):
     def RemovePrecursorToken(self, inp):
         return inp[:, self.added_tokens :]
 
+    def sequence_mask(self, seq):
+        return seq != self.NT
+
     def Main(self, inp, kv_feats, embed=None, spec_mask=None, seq_mask=None):
         out = inp
         for layer in self.main:
@@ -238,8 +204,107 @@ class DenovoDiffusionDecoder(nn.Module):
         
         return out
 
-    def sequence_mask(self, seq):
-        return seq != self.NT
+class DenovoDiffusionDecoder(base_diffusion_decoder):
+    def __init__(self,
+        token_dict,
+        dec_config,
+        diff_obj,
+        input_output_units=128,
+        running_units=512,
+        d=64,
+        h=8,
+        dropout=0,
+        ffn_multiplier=4,
+        depth=6,
+        timestep_dimension=128,
+        precursor_dimension=128,
+        alphabet=False,
+        use_charge=False,
+        use_mass=False,
+        prenorm=False,
+        self_condition=True,
+        output_sigma=False,
+        clip_denoised=False,
+        clamp_denoised=False,
+        **kwargs
+    ):
+        super().__init__(
+            token_dict,
+            running_units=running_units,
+            d=d,
+            h=h,
+            dropout=dropout,
+            ffn_multiplier=ffn_multiplier,
+            alphabet=alphabet,
+            prenorm=prenorm,
+            embed_type='preembed',
+            depth=depth,
+            timestep_dimension=timestep_dimension,
+            kv_input_dimension=dec_config['kv_indim'],
+            use_charge=use_charge,
+            use_mass=use_mass,
+            precursor_dimension=precursor_dimension,
+        )
+        self.create_inpdict(token_dict)
+        
+        self.diff_obj = diff_obj
+        self.dec_config = dec_config
+        self.RU = RU = running_units
+        self.input_output_units = input_output_units
+        self.use_mass = use_mass
+        self.use_charge = use_charge
+        self.max_sl = dec_config['sequence_length']# + 1
+        self.final_down_proj = nn.Linear(RU, input_output_units)
+        self.output_sigma = output_sigma
+        if output_sigma:
+            self.sigma_down_proj = nn.Sequential(
+                nn.Linear(RU, input_output_units),
+                nn.Identity()
+            )
+        self.self_condition = self_condition
+        self.clip_denoised = clip_denoised
+        self.clamp_denoised = clamp_denoised
+        self.time_dimension = timestep_dimension
+        self.precursor_dimension = precursor_dimension
+
+        """
+        Transforming the x input to input for transformer block
+        Note: identity in original paper if no self_condition
+        """
+        # TODO include sigma guess if learned_sigma -> 3*input_output_units
+        x_input_dim = 2*input_output_units if self_condition else input_output_units
+        self.input_proj_dec = nn.Sequential(
+            nn.Linear(x_input_dim, RU),
+            nn.Tanh(),
+            nn.Linear(RU, RU)
+        )
+
+        """
+        # The mapping of tokens to embeddings, and reverse, embeddings
+        # to logits will have a shared weight that is only trained by
+        # forward process.
+        """
+        # seq_emb: forward
+        self.seq_emb = nn.Embedding(
+            self.total_num_tokens, input_output_units, padding_idx=self.NT
+        )
+        self.seq_emb.weight = I.normal_(self.seq_emb.weight, 0, 0.03)
+        with th.no_grad(): 
+            self.seq_emb.weight[self.NT] = th.zeros_like(self.seq_emb.weight[self.NT])
+        # lm_head: backward
+        self.lm_head = nn.Linear(input_output_units, len(self.outdict))
+        with th.no_grad():
+            self.lm_head.weight = self.seq_emb.weight
+
+        """Timestep embedding"""
+        self.time_embed = nn.Sequential(
+            nn.Linear(timestep_dimension, timestep_dimension),
+            nn.SiLU(),
+            nn.Linear(timestep_dimension, timestep_dimension)
+        )
+    
+    def create_inpdict(self, token_dict):
+        self.total_num_tokens = len(self.outdict)
 
     def get_embed(self, seq):
         return self.seq_emb(seq)
@@ -249,23 +314,6 @@ class DenovoDiffusionDecoder(nn.Module):
 
     def concat_self_cond(self, x, self_cond):
         return th.cat([x, self_cond], dim=-1)
-
-    def append_null_token(self, intseq):
-        bs, sl = intseq.shape
-        nulls = th.fill(th.empty(bs, dtype=th.int64), self.NT).to(intseq.device)
-        out = th.cat([intseq, nulls[:,None]], dim=-1)
-
-        return out
-
-    def replace_with_eos_token(self, intseq, lengths):
-        bs, sl = intseq.shape
-        eos_inds = [th.arange(bs, device=intseq.device), lengths]
-        intseq[eos_inds] = self.EOS
-
-        return intseq
-
-    def total_params(self):
-        return sum([m.numel() for m in self.parameters() if m.requires_grad])
 
     def forward(self, 
                 x,
@@ -345,30 +393,121 @@ class DenovoDiffusionDecoder(nn.Module):
     def set_clamp(self, boolean: bool):
         self.clamp_denoised = boolean
 
-def _calc_mass_error(
-    calc_mz: float, obs_mz: float, charge: int, isotope: int = 0
-) -> float:
-    """
-    Calculate the mass error in ppm between the theoretical m/z and the observed
-    m/z, optionally accounting for an isotopologue mismatch.
+class MDLMDecoder(base_diffusion_decoder):
+    def __init__(self,
+        token_dict,
+        decoder_config,
+        running_units=512,
+        d=64,
+        h=8,
+        dropout=0,
+        ffn_multiplier=4,
+        depth=6,
+        timestep_dimension=128,
+        precursor_dimension=128,
+        alphabet=False,
+        use_charge=False,
+        use_mass=False,
+        prenorm=False,
+        self_condition=True,
+        output_sigma=False,
+        clip_denoised=False,
+        clamp_denoised=False,
+        **kwargs
+    ):
+        super().__init__(
+            token_dict,
+            running_units=running_units,
+            d=d,
+            h=h,
+            dropout=dropout,
+            ffn_multiplier=ffn_multiplier,
+            alphabet=alphabet,
+            prenorm=prenorm,
+            embed_type=None,
+            depth=depth,
+            timestep_dimension=timestep_dimension,
+            kv_input_dimension=decoder_config['kv_indim'],
+            use_charge=use_charge,
+            use_mass=use_mass,
+            precursor_dimension=precursor_dimension,
+        )
+        self.finish_dict(token_dict)
+        self.timestep_dimension = timestep_dimension
+        self.self_condition = self_condition
 
-    Parameters
-    ----------
-    calc_mz : float
-        The theoretical m/z.
-    obs_mz : float
-        The observed m/z.
-    charge : int
-        The charge.
-    isotope : int
-        Correct for the given number of C13 isotopes (default: 0).
+        self.max_sl = decoder_config['sequence_length'] # + 1
 
-    Returns
-    -------
-    float
-        The mass error in ppm.
-    """
-    return (calc_mz - (obs_mz - isotope * 1.00335 / charge)) / obs_mz * 10**6
+        # Timestep embedding
+        self.time_embed = nn.Sequential(
+            nn.Linear(timestep_dimension, timestep_dimension),
+            nn.SiLU(),
+            nn.Linear(timestep_dimension, timestep_dimension),
+        )
+        
+        #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
+        self.embed_sequence = nn.Embedding(self.predcats, running_units)
+        if self_condition:
+            self.embed_self_conditions = nn.Linear(self.predcats, running_units)
+        
+        self.proj_begin = nn.Sequential(
+            nn.Linear(running_units, running_units),
+            nn.LayerNorm(running_units),
+            nn.ReLU(),
+        )
+        self.proj_end = nn.Sequential(
+            nn.Linear(running_units, running_units),
+            nn.LayerNorm(running_units),
+            nn.ReLU(),
+            nn.Linear(running_units, self.predcats),
+        )
 
+    def finish_dict(self, token_dict):
+        self.outdict['<SOS>'] = len(self.outdict)
+        self.outdict['<MASK>'] = len(self.outdict)
+        self.MASK = self.outdict['<MASK>']
+        self.rev_outdict = {n:m for m,n in self.outdict.items()}
+        self.predcats = len(np.unique(list(self.outdict.values())))
 
+    def forward(self,
+        x,
+        timesteps,
+        kv_features,
+        charge,
+        mass,
+        specmask=None,
+        self_conditions=None,
+    ):
+        # Timestep
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
 
+        # Beginning
+        seq_emb = self.embed_sequence(x)
+        if self.self_condition:
+            seq_emb += self.embed_self_conditions(self_conditions)
+        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass) # position added inside
+        emb = self.proj_begin(emb)
+        
+        # Middle
+        out = self.Main(
+            emb, 
+            kv_feats=kv_features,
+            embed=time_emb,
+            spec_mask=specmask,
+            seq_mask=None,
+        )
+
+        # End
+        out = self.proj_end(out)
+        out = self.RemovePrecursorToken(out)
+
+        return out
+    
+    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, progress=False):
+        model_kwargs = {
+            'kv_features': embedding,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+        }
+        out = self.diff_obj._sample(save_x=save_x, save_p=save_p, progress=progress, model_kwargs=model_kwargs)
+        return out
