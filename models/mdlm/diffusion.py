@@ -53,30 +53,21 @@ class Loss:
   nlls: torch.FloatTensor
   token_mask: torch.FloatTensor
 
+def CosineSampler(num_steps):
+    t_array = torch.arange(num_steps, -1, -1).type(torch.float32)
+    return torch.cos( (np.pi / 2) * (1 - t_array / len(t_array)) ).clamp(1e-5)
 
-class NLL(torchmetrics.aggregation.MeanMetric):
-  pass
+def SigmoidSampler(num_steps, zero_value=0.00247):
+    t_array = torch.arange(num_steps, -1, -1).type(torch.float32)
+    offset = np.log((1-zero_value) / zero_value)
+    multiplier = (offset - np.log(zero_value / (1-zero_value))) / num_steps
+    multiplier2 = 1 / (1 - 2*zero_value)
+    output = (multiplier2*(1 / (1+torch.exp(offset - multiplier*t_array)))-zero_value).clamp(1e-5)
+    return output
 
-
-class BPD(NLL):
-  def compute(self) -> Tensor:
-    """Computes the bits per dimension.
-
-    Returns:
-      bpd
-    """
-    return self.mean_value / self.weight / LOG2
-
-
-class Perplexity(NLL):
-  def compute(self) -> Tensor:
-    """Computes the Perplexity.
-
-    Returns:
-     Perplexity
-    """
-    return torch.exp(self.mean_value / self.weight)
-
+def CubeSampler(num_steps):
+    t_array = torch.arange(num_steps, -1, -1).type(torch.float32)
+    return (1.9073486328125e-06*(t_array - num_steps/2)**3 + 0.5).clamp(1e-5)
 
 class Diffusion:
   def __init__(
@@ -656,8 +647,18 @@ class Diffusion:
       
       # Initialize variables
       x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
-      timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
-      dt = (1 - eps) / num_steps
+      if self.config['sampling']['sampler'] == 'cosine':
+          # Delays unmasking
+          timesteps = CosineSampler(num_steps)
+      elif self.config['sampling']['sampler'] == 'sigmoid':
+          # Increases unmasking in the middle of trajectory
+          timesteps = SigmoidSampler(num_steps, self.config['sampling']['sigmoid_zero_value'])
+      elif self.config['sampling']['sampler'] == 'cube':
+          # Increases unmasking at beginning and end
+          timesteps = CubeSampler(num_steps)
+      else:
+          # Unmasking rate is constant throughout trajectory
+          timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
       p_x0_cache = None
       if self.config['model']['self_condition']:
           model_kwargs['self_conditions'] = torch.zeros(
@@ -673,6 +674,7 @@ class Diffusion:
       pbar = tqdm(range(num_steps)) if progress else range(num_steps)
       for i in pbar:
           t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
+          dt = timesteps[i] - timesteps[i+1]
           model_kwargs['timesteps'] = t
           
           if self.sampler == 'ddpm':

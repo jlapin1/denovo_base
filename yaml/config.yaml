@@ -54,7 +54,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -169,6 +169,8 @@ decoder_mdlm:
     sampling:
       predictor: ddpm_cache
       steps: 128
+      sampler: sigmoid # linear | cosine | sigmoid | cube
+      sigmoid_zero_value: 0.00247
       top: True
       move_chance_multiplier: 1.0
       noise_removal: True
