@@ -25,7 +25,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 LOG2 = math.log(2)
 
 
-def _sample_categorical(categorical_probs):
+def _sample_categorical(categorical_probs, **kwargs):
   gumbel_norm = (
     1e-10
     - (torch.rand_like(categorical_probs) + 1e-10).log())
@@ -574,7 +574,8 @@ class Diffusion:
       p_x0 = logp_x0.exp()
     
     assert move_chance_t.ndim == p_x0.ndim
-    q_xs = p_x0 * (move_chance_t - move_chance_s) * self.config['sampling']['move_chance_multiplier']
+    q_xs = p_x0 * (move_chance_t - move_chance_s) * (p_x0 > self.config['sampling']['min_prob']).float()
+    q_xs[p_x0 > self.config['sampling']['max_prob']] = 1e10
     q_xs[:, :, self.mask_index] = move_chance_s[:, :, 0]
     sampler = _sample_top_categorical if self.config['sampling']['top'] else _sample_categorical
     _x = sampler(q_xs)

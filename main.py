@@ -828,9 +828,9 @@ class DenovoMDLMObj(BaseDenovo):
         }
 
         backbone = self.model.decoder
-        loss, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
+        model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
         
-        loss = F.cross_entropy(loss.transpose(-1,-2), target, reduction='none')
+        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
         # Logging token loss
         discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
         self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)

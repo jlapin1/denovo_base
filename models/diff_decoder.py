@@ -453,7 +453,7 @@ class MDLMDecoder(base_diffusion_decoder):
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
         if self_condition:
-            self.embed_self_conditions = nn.Linear(self.predcats, running_units)
+            self.embed_self_conditions = nn.Sequential(nn.Linear(self.predcats, running_units))
         
         self.proj_begin = nn.Sequential(
             nn.Linear(running_units, running_units),
