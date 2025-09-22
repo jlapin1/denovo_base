@@ -61,13 +61,6 @@ def collate_fn(batch_list):
 
     return out
 
-exceptions = {
-    'C(+57.02)': 'C+57.021',
-    'M(+15.99)': 'M+15.995',
-    'N(+.98)': 'N+0.984',
-    'Q(+.98)': 'Q+0.984',
-}
-
 class LoaderObj:
     def build_dataloader(self, dataset, batch_size, num_workers, collate_fn, shuffle=False):
         return DataLoader(
@@ -83,9 +76,18 @@ class LoaderObj:
             line.split()[0]:m for m, line in enumerate(open(dictionary_path).read().strip().split('\n'))
         }
         amod_dic['X'] = len(amod_dic)
-        amod_dic_rev = {b:a for a,b in amod_dic.items()}
 
-        return amod_dic, amod_dic_rev
+        return amod_dic
+
+    def reverse_dictionary(self, amod_dic):
+        return {b:a for a,b in amod_dic.items()}
+
+    def synonym(self, token1, token2, amod_dic):
+        low = np.minimum(amod_dic[token1], amod_dic[token2])
+        high = np.maximum(amod_dic[token1], amod_dic[token2])
+        amod_dic[token1] = amod_dic[token2] = low
+        amod_dic = {key:value if value < high else value-1 for key, value in amod_dic.items()}
+        return amod_dic
     
     def create_label_dictionary(self, dataset_path):
         filepath = join(dataset_path, "parquet/labeled_sequences/species_list.txt")
@@ -168,6 +170,7 @@ class LoaderHF(LoaderObj):
         val_dataset_path: str=None,
         val_name: str=None,
         dictionary_path: str=None,
+        synonyms: list=None,
         masses_path: str=None,
         tokenizer_path: str=None,
         test_split_method: str='full_val',
@@ -190,7 +193,12 @@ class LoaderHF(LoaderObj):
         # Dictionary #
         ##############
         if dictionary_path is not None:
-            self.amod_dic, self.amod_dic_rev = self.create_sequence_dictionary(dictionary_path)
+            self.amod_dic = self.create_sequence_dictionary(dictionary_path)
+            if synonyms is not None:
+                for pair in synonyms:
+                    letter_a, letter_b = pair
+                    self.amod_dic = self.synonym(letter_a, letter_b, self.amod_dic)
+            self.amod_dic_rev = self.reverse_dictionary(self.amod_dic)
         
         #####################
         # Dictionary masses #

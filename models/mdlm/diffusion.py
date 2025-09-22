@@ -80,7 +80,7 @@ class Diffusion:
     self.config = config
 
     self.tokenizer = tokenizer
-    self.vocab_size = len(dictionary)
+    self.vocab_size = np.max(list(dictionary.values())) + 1
     self.sampler = self.config['sampling']['predictor']
     self.antithetic_sampling = self.config['training']['antithetic_sampling']
     self.importance_sampling = self.config['training']['importance_sampling']
@@ -577,8 +577,8 @@ class Diffusion:
     q_xs = p_x0 * (move_chance_t - move_chance_s) * (p_x0 > self.config['sampling']['min_prob']).float()
     q_xs[p_x0 > self.config['sampling']['max_prob']] = 1e10
     q_xs[:, :, self.mask_index] = move_chance_s[:, :, 0]
-    sampler = _sample_top_categorical if self.config['sampling']['top'] else _sample_categorical
-    _x = sampler(q_xs)
+    sampler = _sample_top_categorical #if self.config['sampling']['top'] else _sample_categorical
+    _x = sampler(q_xs, np.maximum(2, self.config['sampling']['top']))
     
     copy_flag = (x != self.mask_index).to(x.dtype)
     return p_x0, copy_flag * x + (1 - copy_flag) * _x, logits

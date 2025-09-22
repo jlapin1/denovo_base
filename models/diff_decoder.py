@@ -43,6 +43,10 @@ def init_decoder_weights(module):
         if module.bias is not None:
             module.bias = I.zeros_(module.bias)
 
+def get_max_dic_value(dictionary, plus=1):
+    # Must have at least as many embeddings as maximum integer
+    return np.max(list(dictionary.values())) + plus
+
 class base_diffusion_decoder(nn.Module):
     def __init__(self, 
         token_dict,
@@ -68,11 +72,11 @@ class base_diffusion_decoder(nn.Module):
         #####################
         self.outdict = deepcopy(token_dict)
         self.NT = self.outdict['X']
-        self.outdict['<EOS>'] = np.max(list(self.outdict.values())) + 1
+        self.outdict['<EOS>'] = get_max_dic_value(self.outdict)
         self.EOS = self.outdict['<EOS>']
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
-        self.predcats = len(np.unique(list(self.outdict.values())))
+        self.predcats = get_max_dic_value(self.outdict)
         self.scale = Scale(self.outdict)
 
         self.use_mass = use_mass
@@ -309,7 +313,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         )
     
     def create_inpdict(self, token_dict):
-        self.total_num_tokens = len(self.outdict)
+        self.total_num_tokens = get_max_dic_value(self.outdict)
 
     def get_embed(self, seq):
         return self.seq_emb(seq)
@@ -437,7 +441,7 @@ class MDLMDecoder(base_diffusion_decoder):
             use_mass=use_mass,
             precursor_dimension=precursor_dimension,
         )
-        self.finish_dict(token_dict)
+        self.finish_dict()
         self.timestep_dimension = timestep_dimension
         self.self_condition = self_condition
 
@@ -467,12 +471,12 @@ class MDLMDecoder(base_diffusion_decoder):
             nn.Linear(running_units, self.predcats),
         )
 
-    def finish_dict(self, token_dict):
-        self.outdict['<SOS>'] = len(self.outdict)
-        self.outdict['<MASK>'] = len(self.outdict)
+    def finish_dict(self):
+        self.outdict['<SOS>'] = get_max_dic_value(self.outdict) #TODO REMOVE THIS
+        self.outdict['<MASK>'] = get_max_dic_value(self.outdict)
         self.MASK = self.outdict['<MASK>']
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
-        self.predcats = len(np.unique(list(self.outdict.values())))
+        self.predcats = get_max_dic_value(self.outdict)
 
     def forward(self,
         x,

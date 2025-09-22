@@ -8,7 +8,7 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 1.0e-4 # phase 2 LR
+lr_warmup_end: 1.5e-4 # phase 2 LR
 lr_warmup_steps: 20000 #20000
 # Phase 2 - Flat
 lr_flat_steps: 266000 #266000
@@ -21,11 +21,11 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -37,24 +37,25 @@ loader:
   val_name: cerevisiae
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
+  synonyms:
+    #- [I, L]
+    #- [D, N+0.984]
+    #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 4
   val_steps: 100
   remove_columns:
-    #- 'evidence_index'
     - 'scan_number'
     - 'sequence'
     - 'precursor_mz'
     - 'retention_time'
-    #- 'title'
-    #- 'scans'
   scratch:
     use: False
     path: /media/storage/scratch/ninespecies/
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: diff # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -171,7 +172,7 @@ decoder_mdlm:
       steps: 128
       sampler: linear # linear | cosine | sigmoid | cube
       sigmoid_zero_value: 0.00247
-      top: True
+      top: 1
       min_prob: 0.
       max_prob: 1.
       noise_removal: True
