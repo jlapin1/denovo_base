@@ -46,6 +46,8 @@ def collate_fn(batch_list):
     mass = np.stack([m['precursor_mass'] for m in batch_list])
     peplen = np.stack([m['peptide_length'] for m in batch_list])
     intseq = np.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
+    chimeric = np.stack([m['chimeric'] for m in batch_list])
+    hyperscore = np.stack([m['Hyperscore'] for m in batch_list])
 
     out = {
         'experiment_name': species,
@@ -56,7 +58,8 @@ def collate_fn(batch_list):
         'length': th.tensor(speclen, dtype=th.int32),
         'intseq': th.tensor(intseq, dtype=th.int32),
         'peplen': th.tensor(peplen, dtype=th.int32),
-        #'spectrum_lengths': speclen[:,None],
+        'chimeric': chimeric,
+        'hyperscore': hyperscore,
     }
 
     return out

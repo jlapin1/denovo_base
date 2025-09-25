@@ -6,7 +6,7 @@ eval_only:
   max_batches: 100
   save: True
   stream: False
-  outpath: ./test_100_batches_2025-09-03_10-09-53.parquet
+  outpath: ./hold2.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing

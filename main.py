@@ -298,6 +298,8 @@ class BaseDenovo:
         def initial_dataframe(extra_keys: list=[]):
             dataframe = {
                 'name': [],
+                'chimeric': [],
+                'hyperscore': [],
                 'targ_intseq': [],
                 'charge': [],
                 'mass': [],
@@ -384,6 +386,8 @@ class BaseDenovo:
             if save_df or stream_write:
                 self.on_eval_step_end(batchdev, out_dict, dataframe)
                 dataframe['name'].extend(batch['experiment_name'])
+                dataframe['chimeric'].extend(batch['chimeric'])
+                dataframe['hyperscore'].extend(batch['hyperscore'])
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
                 dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
                 dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
@@ -923,7 +927,12 @@ if __name__ == '__main__':
             'loader', 'log_wandb', 'eval_only', 'batch_size',
             'top_peaks', 'classifier_config', 'new_exp',
         ]:
+            if key == 'loader':
+                # These must be consistent with embedding layer in decoder
+                config_[key]['synonyms'] = config[key]['synonyms']
+                config_[key]['dictionary_path'] = config[key]['dictionary_path']
             config[key] = config_[key]
+            
     # Create new experiment
     elif config['save_weights']:
         rddir = None

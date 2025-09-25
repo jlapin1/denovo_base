@@ -55,7 +55,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
