@@ -9,6 +9,62 @@ import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
 total_aa_mass = lambda m_z, charge: (m_z - 1.00727646688)*charge - 18.010565
+def find_winners(seqs, masses_ref, exp_mz, charges, n, mass_tol, return_full=False):
+    bs = seqs.shape[0] // n
+    seqs_rs = seqs.reshape(bs, n, -1)
+    ls = [seqs_rs[i].unique(dim=0, return_inverse=True, return_counts=True) for i in range(bs)]
+    
+    rs = 0
+    inds = []
+    for m in range(bs):
+        inds.append(ls[m][1]+rs)
+        rs += int(ls[m][1].max()) + 1
+    inds = th.cat(inds, dim=0)
+    counts = th.cat([l[2] for l in ls], 0)
+
+    # Does the mass match the precursor?
+    masses = masses_ref.to(seqs.device)[None].repeat([bs*n, 1]).gather(1, seqs).sum(-1)
+    passfail = abs(masses - total_aa_mass(exp_mz, charges)) < mass_tol
+
+    # Top occurring sequence for each batch member
+    cnt_full = counts[inds].reshape(bs, n)
+    pf_full = passfail.reshape(bs, n)
+    add_index = cnt_full*pf_full
+    add_index = add_index.argsort(1) if return_full else add_index.argmax(1)
+    
+    # Highest occurring sequence when nothing fits precursor
+    if return_full==False:
+        all_fail = pf_full.sum(1) == 0
+        add_index[all_fail] = cnt_full[all_fail].argmax(1)
+
+    # Best index for every batch member
+    winners = th.arange(0, bs*n, n).to(seqs.device)
+    if return_full:
+        winners = (winners[:,None].tile([1,n]) + add_index).reshape(-1,)
+    else:
+        winners = winners + add_index
+        assert len(winners) == bs, f'There should be {bs} winners, not {len(winners)}'
+    
+    return winners
+
+def calculate_entropy(trajectory_logits):
+    batch_size, traj_size, sequence_length, logits_size = trajectory_logits.shape
+
+    traj = trajectory_logits.softmax(dim=-1) # bs, traj, sl, logits
+    entropies = (-traj*traj.log()).sum(-1).mean(1)
+    #mask = th.arange(sequence_length, device=trajectory.device)[None].tile([batch_size, 1]) <= peptide_length[:,None]
+    #peptide_entropies = (entropies*mask).sum(1) / peptide_length
+
+    return entropies
+
+def reshape_top_k(tensor, k):
+    shape = tensor.shape
+    if len(shape) == 2:
+        a,b = shape
+        return tensor.reshape(-1,k,b)
+    elif len(shape) == 3:
+        a,b,c = shape
+        return tensor.reshape(-1,k,b,c)
 
 class Seq2Seq(nn.Module):
     def __init__(
@@ -167,16 +223,6 @@ class Seq2SeqDiff(Seq2Seq):
         )
         return output
 
-    def calculate_entropy(self, trajectory):
-        batch_size, traj_size, sequence_length, logits_size = trajectory.shape
-
-        traj = self.decoder.get_logits(trajectory.detach()).softmax(dim=-1) # bs, traj, sl, logits
-        entropies = (-traj*traj.log()).sum(-1).mean(1)
-        #mask = th.arange(sequence_length, device=trajectory.device)[None].tile([batch_size, 1]) <= peptide_length[:,None]
-        #peptide_entropies = (entropies*mask).sum(1) / peptide_length
-
-        return entropies
-
     def predict_sequence(
         self,
         batch,
@@ -184,6 +230,7 @@ class Seq2SeqDiff(Seq2Seq):
         save_xstart=True,
         entropy=True, # replace logits with entropy calculation
         n=None,
+        return_full=False,
         cls_dict=None,
         progress=False,
     ):
@@ -204,26 +251,17 @@ class Seq2SeqDiff(Seq2Seq):
             progress=progress,
         )
         # Depending on arguments, the output of the decoder will differ
-        """if len(diffout) == 4:
-            seqs, logits, xcur, xstart = diffout
-            additional_outputs = (xcur, xstart)
-        elif len(diffout) == 3:
-            seqs, logits, xcurstart = diffout
-
-            if entropy:
-                logits = self.calculate_entropy(xcurstart)
-                additional_outputs = ()
-            else:
-                additional_outputs = (xcurstart,)
-        else:
-            seqs, logits = diffout
-            additional_outputs = ()"""
         seqs = diffout.pop('prediction')
         logits = diffout.pop('logits')
         if entropy:
-            diffout['entropy'] = self.calculate_entropy(diffout['xstart'])
-        
-        seqs_rs = seqs.reshape(bs, n, -1)
+            trajectory_logits = self.decoder.get_logits(diffout['xstart'].detach())
+            diffout['entropy'] = calculate_entropy(trajectory_logits)
+
+        winners = find_winners(
+            seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
+        )
+
+        """seqs_rs = seqs.reshape(bs, n, -1)
         ls = [seqs_rs[i].unique(dim=0, return_inverse=True, return_counts=True) for i in range(bs)]
         #uniqs = th.cat([l[0] for l in ls], 0)
         rs = 0
@@ -249,10 +287,11 @@ class Seq2SeqDiff(Seq2Seq):
         
         # Best index for every batch member
         winners = th.arange(0, full_size, n).to(device) + add_index
-        assert len(winners) == bs
-        top_sequences = seqs[winners]
-        logits = logits[winners]
-        additional_outputs = {x: y[winners] for x,y in diffout.items()}
+        assert len(winners) == bs"""
+        reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
+        top_sequences = reshape(seqs[winners])
+        logits = reshape(logits[winners])
+        additional_outputs = {x: reshape(y[winners]) for x,y in diffout.items()}
 
         return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
         return return_       
