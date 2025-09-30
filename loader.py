@@ -46,8 +46,8 @@ def collate_fn(batch_list):
     mass = np.stack([m['precursor_mass'] for m in batch_list])
     peplen = np.stack([m['peptide_length'] for m in batch_list])
     intseq = np.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
-    chimeric = np.stack([m['chimeric'] for m in batch_list])
-    hyperscore = np.stack([m['Hyperscore'] for m in batch_list])
+    chimeric = np.stack([m['chimeric'] for m in batch_list]) if 'chimeric' in batch_list[0].keys() else []
+    hyperscore = np.stack([m['Hyperscore'] for m in batch_list]) if 'hyperscore' in batch_list[0].keys() else []
 
     out = {
         'experiment_name': species,

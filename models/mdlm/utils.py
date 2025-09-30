@@ -8,7 +8,7 @@ import logging
 import math
 
 import fsspec
-import lightning
+#import lightning
 import torch
 #from timm.scheduler import CosineLRScheduler
 

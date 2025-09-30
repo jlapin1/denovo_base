@@ -159,7 +159,7 @@ class base_diffusion_decoder(nn.Module):
 
     def replace_with_eos_token(self, intseq, lengths):
         bs, sl = intseq.shape
-        eos_inds = [th.arange(bs, device=intseq.device), lengths]
+        eos_inds = (th.arange(bs, device=intseq.device), lengths)
         intseq[eos_inds] = self.EOS
 
         return intseq

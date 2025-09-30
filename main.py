@@ -245,7 +245,7 @@ class BaseDenovo:
         if len(intseq.shape) == 1:
             intseq = intseq[None]
         bs, sl = intseq.shape
-        eos_inds = [th.arange(bs, device=intseq.device), lengths]
+        eos_inds = (th.arange(bs, device=intseq.device), lengths)
         intseq[eos_inds] = self.model.decoder.EOS
 
         return intseq
@@ -316,6 +316,8 @@ class BaseDenovo:
         if save_df or stream_write:
             dataframe = initial_dataframe()
             schema_defined = False
+        else:
+            dataframe = None
 
         # losses
         out = {'ce': 0}
@@ -416,7 +418,7 @@ class BaseDenovo:
                 tots['sum'][metric] += dn_metrics['sum'][metric]
                 tots['total'][metric] += dn_metrics['total'][metric]
 
-            self.on_eval_step_end(target, loss_mask)
+            self.on_eval_step_end(target, loss_mask, dataframe=dataframe)
         
         steps = i+1
         totsz = self.config['batch_size']*steps
@@ -723,7 +725,9 @@ class DenovoDiffusionObj(BaseDenovo):
         self.model.diff_obj.my_loss_history = np.zeros((self.model.diff_obj.num_timesteps, 3))
         self.model.diff_obj.my_loss_count = np.zeros((self.model.diff_obj.num_timesteps,))
     
-    def on_eval_step_end(self, batch, out_dict, dataframe):
+    def on_eval_step_end(self, batch, out_dict, dataframe=None):
+        if dataframe is None:
+            return 0
         if 'entropy' not in dataframe:
             dataframe['entropy'] = []
         

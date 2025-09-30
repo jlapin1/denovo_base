@@ -31,12 +31,12 @@ wandb_project: diffusion
 
 # Loader options
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  train_dataset_path: /proj/bedrock/datasets/9_species_V2
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  val_dataset_path: /proj/bedrock/datasets/9_species_V2
   val_name: cerevisiae
-  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
+  masses_path: /proj/bedrock/datasets/9_species_V2
+  dictionary_path: /proj/bedrock/datasets/9_species_V2/ns_dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
@@ -55,7 +55,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: diff # *diff* | *mdlm* | *
 
 # Encoder model
 
