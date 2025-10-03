@@ -59,12 +59,17 @@ def calculate_entropy(trajectory_logits):
 
 def reshape_top_k(tensor, k):
     shape = tensor.shape
-    if len(shape) == 2:
+    if len(shape) == 1:
+        return tensor.reshape(-1,k)
+    elif len(shape) == 2:
         a,b = shape
         return tensor.reshape(-1,k,b)
     elif len(shape) == 3:
         a,b,c = shape
         return tensor.reshape(-1,k,b,c)
+    elif len(shape) == 4:
+        a,b,c,d = shape
+        return tensor.reshape(-1,k,b,c,d)
 
 def expand_batch(batch, n=1):
     bs, sl = batch['mz'].shape
@@ -350,7 +355,7 @@ class Seq2SeqMDLM(Seq2Seq):
         # Probability calculations
         if save_p and save_x:
             nbs, sl = seqs.shape
-            slmask = th.arange(sl, device=device)[None].tile([nbs, 1]) < th.where(seqs == self.decoder.EOS)[-1][:,None]
+            slmask = th.arange(sl, device=device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
             diffout['aa_prob_min'], diffout['pep_prob_min'] = self.calculate_min_peptide_prob(seqs, diffout['p_save'], slmask)
             
             reveal = self.get_reveal_steps(diffout['x_save'])

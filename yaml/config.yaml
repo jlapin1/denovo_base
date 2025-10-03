@@ -17,7 +17,7 @@ lr_floor: 1.0e-5
 lr_decay_steps: 1000000 # 1000000
 
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2025-09-03_10-09-53 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -55,7 +55,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -159,7 +159,7 @@ decoder_diff:
     clamp_denoised: False
   # ensemble prediction
   ensemble:
-    ensemble_n: 3
+    ensemble_n: 1
     mass_tol: 1e-2
 decoder_mdlm:
   diffusion_config:
@@ -188,9 +188,6 @@ decoder_mdlm:
       change_of_variables: False
     noise:
       type: loglinear
-      sigma_min: 1.0e-4
-      sigma_max: 20
-      exponent: 1.5
     model:
       length: 41
       self_condition: True

@@ -89,6 +89,7 @@ class Diffusion:
     self.mask_index = dictionary['<MASK>']
     self.bos_token_id = dictionary['<SOS>']
     self.eos_token_id = dictionary['<EOS>']
+    self.NT = dictionary['X']
     self.parameterization = self.config['parameterization']
     
     self.backbone = backbone
@@ -886,6 +887,9 @@ class Diffusion:
       model_kwargs['timesteps'] = sigma if self.time_conditioning else torch.zeros_like(sigma)
       move_chance = 1 - torch.exp(-sigma[:, None])
     
+    #within = (torch.where(x0 == self.eos_token_id)[1]+1)[:,None] > torch.arange(x0.shape[1], device=device)[None].tile([x0.shape[0],1])
+    #multiplier = torch.where(within, 1.0, ~within * t[:,None].clamp(0.5, 0.9)) # t*t < t
+    #move_chance = move_chance * multiplier
     xt = self.q_xt(x0, move_chance)
 
     if self.config['model']['self_condition']:
