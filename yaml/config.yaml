@@ -21,11 +21,11 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -43,6 +43,7 @@ loader:
     #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 4
+  reverse: True
   val_steps: 100
   remove_columns:
     - 'scan_number'
@@ -55,7 +56,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: ar # *diff* | *mdlm* | *
 
 # Encoder model
 

@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 join = os.path.join
 
-def map_fn(example, tokenizer, dic=None, top=100, max_seq=50):
+def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
     ab = example['intensity_array']
     ab_sort = (-ab).argsort()[:top]
     ab = ab[ab_sort]
@@ -30,6 +30,8 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50):
     example['spectrum_length'] = len(example['mz_array'])
     tokenized_sequence = tokenizer(example['modified_sequence'])
     peptide_length = len(tokenized_sequence)
+    if reverse:
+        tokenized_sequence = tokenized_sequence[::-1]
     example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
     example['peptide_length'] = peptide_length
     example['spectrum_length'] = spectrum_length
@@ -178,6 +180,7 @@ class LoaderHF(LoaderObj):
         tokenizer_path: str=None,
         test_split_method: str='full_val',
         top_pks: int=100,
+        reverse: bool=False,
         batch_size: int=100,
         num_workers: int=0,
         **kwargs
@@ -241,7 +244,8 @@ class LoaderHF(LoaderObj):
             tokenizer=self.tokenizer,
             dic=self.amod_dic,
             top=top_pks, 
-            max_seq=max_seq
+            max_seq=max_seq,
+            reverse=reverse,
         )
         if 'remove_columns' in kwargs:
             remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]

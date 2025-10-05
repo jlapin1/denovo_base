@@ -72,7 +72,7 @@ class base_diffusion_decoder(nn.Module):
         #####################
         self.outdict = deepcopy(token_dict)
         self.NT = self.outdict['X']
-        self.outdict['<EOS>'] = get_max_dic_value(self.outdict)
+        self.outdict['<EOS>'] = int(get_max_dic_value(self.outdict))
         self.EOS = self.outdict['<EOS>']
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}

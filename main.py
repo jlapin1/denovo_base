@@ -81,6 +81,7 @@ class BaseDenovo:
             self.val_steps = 1 if val_steps == None else val_steps # backwards compatiblity
         else:
             self.val_steps = 100
+        self.reverse = config['loader']['reverse']
         self.data = LoaderHF(
             top_pks=config['top_peaks'], 
             pep_length=config['pep_length'],
@@ -275,11 +276,12 @@ class BaseDenovo:
     def to_list_of_strings(self, intseq):
         if len(intseq.shape) == 1:
             intseq = intseq[None]
+        is_reverse = lambda x: x[::-1] if self.reverse else x
         return [
-            [
+            is_reverse([
                 self.model.decoder.rev_outdict[int(n)] 
                 for n in m if n not in [self.model.decoder.NT, self.model.decoder.EOS]
-            ] 
+            ])
             for m in intseq
         ]
 
