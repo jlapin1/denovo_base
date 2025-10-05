@@ -298,7 +298,7 @@ class DenovoDecoder(nn.Module):
         #self.hidden_token = self.inpdict['<h>']
         
         #self.outdict.pop('X')
-        self.outdict['<EOS>'] = np.max(list(self.outdict.values())) + 1
+        self.outdict['<EOS>'] = int(np.max(list(self.outdict.values())) + 1)
         self.EOS = self.outdict['<EOS>']
 
         dec_config['num_inp_tokens'] = np.max(list(self.inpdict.values())) + 1

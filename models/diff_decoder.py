@@ -72,7 +72,7 @@ class base_diffusion_decoder(nn.Module):
         #####################
         self.outdict = deepcopy(token_dict)
         self.NT = self.outdict['X']
-        self.outdict['<EOS>'] = get_max_dic_value(self.outdict)
+        self.outdict['<EOS>'] = int(get_max_dic_value(self.outdict))
         self.EOS = self.outdict['<EOS>']
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
@@ -512,11 +512,17 @@ class MDLMDecoder(base_diffusion_decoder):
 
         return out
     
-    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, progress=False):
+    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, progress=False):
         model_kwargs = {
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
         }
-        out = self.diff_obj._sample(save_x=save_x, save_p=save_p, progress=progress, model_kwargs=model_kwargs)
+        out = self.diff_obj._sample(
+            save_x=save_x, 
+            save_p=save_p, 
+            top=top, 
+            progress=progress, 
+            model_kwargs=model_kwargs
+        )
         return out
