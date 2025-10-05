@@ -768,6 +768,7 @@ class DenovoMDLMObj(BaseDenovo):
             top_peaks = config['top_peaks'], 
             max_peptide_length = config['pep_length'][1], 
             token_dict = self.data.amod_dic,
+            ensemble_config   = config['decoder_diff']['ensemble'],
             masses_path = config['loader']['masses_path'],
         )
         self.initialize_token_loss()
