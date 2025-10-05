@@ -4,7 +4,9 @@ top_peaks: 100
 pep_length: [0, 40]
 epochs: 100
 
-# Learning rate
+#################
+# Learning rate #
+#################
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
@@ -16,20 +18,25 @@ lr_flat_steps: 266000 #266000
 lr_floor: 1.0e-5
 lr_decay_steps: 1000000 # 1000000
 
+############################
+# Loading, logging, saving #
+############################
 # Loading previous weights
 prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
-# Loader options
+##################################
+# Dataset and dataloader options #
+##################################
 loader:
   train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
   train_name:
@@ -43,7 +50,7 @@ loader:
     #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 4
-  reverse: True
+  reverse: False
   val_steps: 100
   remove_columns:
     - 'scan_number'
@@ -54,9 +61,11 @@ loader:
     use: False
     path: /media/storage/scratch/ninespecies/
 
-# Models
+##########
+# Models #
+##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -160,7 +169,7 @@ decoder_diff:
     clamp_denoised: False
   # ensemble prediction
   ensemble:
-    ensemble_n: 3
+    ensemble_n: 1
     mass_tol: 1e-2
 decoder_mdlm:
   diffusion_config:
@@ -193,6 +202,9 @@ decoder_mdlm:
       length: 41
       self_condition: True
 
+############################
+# Classifier for diffusion #
+############################
 # Leaving ckpt empty deactivate classifier guided diffusion
 classifier_config:
   ckpt: #save/2025-04-09_16-07-11/weights/model_epoch=99_ce=0.9836847015079581.wts
