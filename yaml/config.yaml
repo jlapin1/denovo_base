@@ -56,7 +56,7 @@ loader:
 
 # Models
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *mdlm* | *
+decoder_name: diff # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -160,7 +160,7 @@ decoder_diff:
     clamp_denoised: False
   # ensemble prediction
   ensemble:
-    ensemble_n: 1
+    ensemble_n: 3
     mass_tol: 1e-2
 decoder_mdlm:
   diffusion_config:

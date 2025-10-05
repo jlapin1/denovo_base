@@ -266,7 +266,7 @@ class Seq2SeqDiff(Seq2Seq):
         winners = find_winners(
             seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
         )
-        
+
         reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
         top_sequences = reshape(seqs[winners])
         logits = reshape(logits[winners])
