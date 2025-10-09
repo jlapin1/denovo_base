@@ -75,6 +75,10 @@ class BaseDenovo:
         self.global_step = 0
         self.save_last_counter = 0
 
+        self.high_score = 0
+        self.eval_frequency = config['eval_frequency']
+        self.eval_time = time()
+
         # Dataloader
         if 'val_steps' in self.config['loader'].keys(): # backwards compatibility
             val_steps = self.config['loader']['val_steps']
@@ -102,6 +106,15 @@ class BaseDenovo:
             self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
             U.save_optimizer_state(self.opt, os.path.join(self.svdir, 'weights/opt_last.wts'))
             self.save_last_counter = self.global_step
+    
+    def checkpoint(self, score):
+        self.save_last(override=True)
+        if score > self.high_score:
+            self.high_score = score
+            ext = f"step{self.global_step}_high_{self.high_score:.3f}"
+            wtsdir = os.path.join(self.svdir, "weights")
+            for file in glob(os.path.join(wtsdir, "high")): os.remove(file)
+            self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
 
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
@@ -173,7 +186,7 @@ class BaseDenovo:
         
         # Progress bar
         train_steps = int(self.data.train_size // bs)
-        pbar = tqdm(self.data.dataloader['train'], total=train_steps, smoothing=0.1)
+        pbar = tqdm(self.data.dataloader['train'], total=train_steps, smoothing=0.6)
 
         epoch_start = time()
         step_end=epoch_start
@@ -201,7 +214,15 @@ class BaseDenovo:
                 self.running_loss = []
             if self.config['save_weights']:
                 self.save_last()
-
+            if self.eval_frequency is not None and self.config['save_weights']:
+                if time()-self.eval_time > self.eval_frequency:
+                    out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
+                    self.eval_out = out
+                    new_score = out[self.config['high_score']]
+                    self.checkpoint(new_score)
+                    self.eval_time = time()
+                    if self.config['log_wandb']: wandb.log(out)
+            
             step_end = time()
             
         if self.log and (len(self.running_loss) > 0):
@@ -443,7 +464,6 @@ class BaseDenovo:
     def TrainEval(self, eval_dset='val'):
         start_time = time()
         lines = []
-        highscore = 0
         for i in range(self.config['epochs']):
             
             # Train
@@ -452,33 +472,39 @@ class BaseDenovo:
             self.on_train_epoch_end()
             
             # Eval
-            out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
+            if self.eval_frequency is None:
+                out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
+                new_score = out[self.config["high_score"]]
+                if self.config['save_weights']: self.checkpoint(new_score)
             
-            # Logging
-            if self.config['log_wandb']:
-                out['epoch'] = i+1
-                wandb.log(out)
-                out.pop('epoch')
+                # Logging
+                if self.config['log_wandb']:
+                    out['epoch'] = i+1
+                    wandb.log(out)
+                    out.pop('epoch')
+            else:
+                out = self.eval_out
+                new_score = out[self.config["high_score"]]
             
             specifier = " ".join(len(out)*['%s'])
             write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
             line = "ValEpoch %d: %s"%(i, write_out)
             
-            if out[self.config['high_score']] > highscore:
+            if new_score > self.high_score:
                 highline = line
-                highscore = out[self.config['high_score']]
             line += " (%.1f s)"%(time()-start_time)
             lines.append(line)
             print("\r"+line)
             
             # Saving the checkpoint
-            if self.config['save_weights']:
-                self.save_last(override=True)
-                if highscore == out[self.config['high_score']]:
-                    ext = f"epoch{i}_high_{highscore:.3f}"
-                    wtsdir = os.path.join(self.svdir, "weights")
-                    for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
-                    self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
+            #if self.config['save_weights']:
+            #    self.checkpoint(new_score)
+                #self.save_last(override=True)
+                #if self.high_score == new_score:
+                #    ext = f"epoch{i}_high_{self.high_score:.3f}"
+                #    wtsdir = os.path.join(self.svdir, "weights")
+                #    for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
+                #    self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
             
             self.eval_stats.append(list(out.values()))
             

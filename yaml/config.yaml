@@ -29,8 +29,9 @@ new_exp: True # continue using old directory (if pev_wts) or create new one
 save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
+eval_frequency: 5400
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -38,18 +39,18 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /proj/bedrock/datasets/9_species_V2
-  train_name:
-  val_dataset_path: /proj/bedrock/datasets/9_species_V2
-  val_name: cerevisiae
-  masses_path: /proj/bedrock/datasets/9_species_V2
-  dictionary_path: /proj/bedrock/datasets/9_species_V2/ns_dictionary.tsv
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/InstaNovo
+  train_name: train
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/InstaNovo
+  val_name: val
+  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/InstaNovo/dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  num_workers: 4
+  num_workers: 2
   reverse: False
   val_steps: 100
   remove_columns:
@@ -65,7 +66,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: diff # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
