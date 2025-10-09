@@ -94,9 +94,9 @@ class LoaderObj:
         amod_dic = {key:value if value < high else value-1 for key, value in amod_dic.items()}
         return amod_dic
     
-    def create_label_dictionary(self, dataset_path):
-        filepath = join(dataset_path, "parquet/labeled_sequences/species_list.txt")
-        List = open(filepath).read().split("\n")
+    def create_label_dictionary(self, dataset_path, filename="species_list.txt"):
+        filepath = join(dataset_path, f"parquet/labeled_sequences/{filename}")
+        List = open(filepath).read().strip().split("\n")
         #tsv = pd.read_csv(filepath, sep='\t', header=None, names=['species_name', 'count'])
         label_dict = {j:i for i,j  in enumerate(List)}
         label_dictr = {j:i for i,j in label_dict.items()}
@@ -336,13 +336,18 @@ class LoaderCls(LoaderObj):
         
         # Dictionary
         if dictionary_path is not None:
-            self.amod_dic, self.amod_dicr = self.create_sequence_dictionary(dictionary_path)
+            self.amod_dic = self.create_sequence_dictionary(dictionary_path)
 
         # Class mapping
-        self.label_dict, self.label_dictr = self.create_label_dictionary(dataset_path)
+        self.label_dict, self.label_dictr = self.create_label_dictionary(dataset_path, filename="classes.txt")
         
         # Tokenizer
         self.tokenizer = self.create_tokenizer(tokenizer_path)
+
+        # Substitution rates
+        #a = {m.split("\t")[0]:float(m.split("\t")[1]) for m in open(join(dataset_path, "parquet/labeled_sequences/subrate.tsv")).read().strip().split("\n")}
+        #start=[b.split('->')[0] for b,c in a.items()]
+        #end=[b.split('->')[1] for b,c in a.items()]
 
         # Load dataset
         data_files = join(dataset_path, "parquet/labeled_sequences", "*parquet")
@@ -350,15 +355,33 @@ class LoaderCls(LoaderObj):
             'parquet',
             data_files=data_files,
         )
+        #dataset['train'] = dataset['train'].select(np.arange(0,100, 10))
+        dataset['train'] = dataset['train'].shuffle()
 
-        def map_fn_local(example, tokenizer, dic, max_seq):
-            tokenized_sequence = tokenizer(example['modified_sequence'])
+        def map_fn_local(example, tokenizer, token_dic, label_dic, max_seq):
+            example['peptide_length'] = len(example['sequence'])
+            tokenized_sequence = tokenizer(example['sequence'])
             length = len(tokenized_sequence)
-            full_seq = tokenized_sequence + (max_seq-length) * ['X']
-            intseq = [dic[a] for a in full_seq[:max_seq]]
+            full_seq = np.array(tokenized_sequence + (max_seq-length) * ['X'], dtype='U20')
+            ism = full_seq == 'M'
+            switch = np.random.rand(len(ism)) < 0.74
+            np.put(full_seq, np.where(ism&switch), v='M+15.995')
+            isn = full_seq == 'N'
+            switch = np.random.rand(len(isn)) < 0.03
+            np.put(full_seq, np.where(isn&switch), v='N+0.984')
+            isq = full_seq == 'Q'
+            switch = np.random.rand(len(isq)) < 0.01
+            np.put(full_seq, np.where(isq&switch), v='Q+0.984')
+            if np.random.rand() < 0.01:
+                nterm = str(np.random.choice(['+42.011', '+43.006', '-17.027']))
+                full_seq = np.append(nterm, full_seq[:-1])
+            
+            intseq = [token_dic[a] for a in full_seq[:max_seq]]
             
             example['intseq'] = intseq
-            example['label'] = self.label_dict[example['experiment_name']]
+            example['label'] = np.zeros(len(label_dic))
+            np.put(example['label'], [label_dic[m] for m in example['enzymes']], 1)
+            #print(example['label'])
             #example['label'] = example['peptide_length']-1
 
             return example
@@ -367,12 +390,17 @@ class LoaderCls(LoaderObj):
         lambda_function = lambda example: map_fn_local(
             example,
             tokenizer=self.tokenizer,
-            dic=self.amod_dic,
+            token_dic=self.amod_dic,
+            label_dic=self.label_dict,
             max_seq=kwargs['pep_length'][1],
+        )
+        dataset = dataset.filter(
+            lambda example:
+            'U' not in example['sequence']
         )
         dataset = dataset.map(
             lambda_function, 
-            remove_columns=['modified_sequence', '__index_level_0__'],
+            remove_columns=['sequence'],
         )
 
         # Filter for length

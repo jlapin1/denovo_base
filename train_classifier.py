@@ -31,8 +31,8 @@ def main():
     ##############
 
     load_config = {
-        "dataset_path": "/cmnfs/data/proteomics/foundational_model/9_species_V1",
-        "dictionary_path": "/cmnfs/data/proteomics/foundational_model/9_species_V1/ns_dictionary.txt",
+        "dataset_path": "/cmnfs/data/proteomics/foundational_model/InstaNovo",
+        "dictionary_path": "/cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv",
         'pep_length': [6,40],
     }
     loader = LoaderCls(**load_config)
@@ -44,7 +44,7 @@ def main():
     # Model #
     #########
     
-    diff_dir = "/cmnfs/proj/diffusion/experiments/2025-03-14_13-20-27"
+    diff_dir = "/cmnfs/proj/diffusion/experiments/2025-08-01_00-24-55"
     classifier = Classifier(
         diff_dir, 
         num_input_tokens   = len(loader.amod_dic) + 1,
@@ -84,19 +84,20 @@ def main():
                 with th.no_grad():
                     out = classifier(latents, ts)
                 
-                cross_entropy_loss = nn.functional.cross_entropy(out, batchdev['labels'].type(th.int64), reduction='none')
+                #cross_entropy_loss = nn.functional.cross_entropy(out, batchdev['labels'].type(th.int64), reduction='none')
+                cross_entropy_loss = nn.functional.binary_cross_entropy_with_logits(out, batchdev['labels'].type(th.float32), reduction='none')
                 sums[f'ce_{t}'] += cross_entropy_loss.sum()
 
-                sums[f'correct_{t}'] += (out.argmax(-1) == batchdev['labels']).sum()
+               # sums[f'correct_{t}'] += (out.argmax(-1) == batchdev['labels']).sum()
 
         
         # Averages
         out = {'ce_all': 0, 'accuracy_all': 0}
         for t in T:
             out[f'ce_{t}'] = float(sums[f'ce_{t}'])    / sums[f'total_inst']
-            out[f'accuracy_{t}'] = int(sums[f'correct_{t}']) / sums[f'total_inst']
+            #out[f'accuracy_{t}'] = int(sums[f'correct_{t}']) / sums[f'total_inst']
             out['ce_all'] += out[f'ce_{t}']
-            out['accuracy_all'] += out[f'accuracy_{t}']
+            #out['accuracy_all'] += out[f'accuracy_{t}']
         out['ce_all'] /= len(T)
         out['accuracy_all'] /= len(T)
 
@@ -115,7 +116,8 @@ def main():
         
         classifier.train()
         out = classifier(latents, ts)
-        loss = nn.functional.cross_entropy(out, batchdev['labels'].type(th.int64))
+        #loss = nn.functional.cross_entropy(out, batchdev['labels'].type(th.int64))
+        loss = nn.functional.binary_cross_entropy_with_logits(out, batchdev['labels'].type(th.float32))
 
         loss.backward()
         opt.step()
@@ -133,11 +135,14 @@ def main():
         U.create_experiment(save_directory, svwts=True)
 
         best_score = 1e10
+        out = evaluation()
         for epoch in range(epochs):
             # Progress bar
+            loader.dataset['train'] = loader.dataset['train'].shuffle()
             pbar = tqdm(loader.dataloader['train'], smoothing=0.1)
             for step, batch in enumerate(pbar):
                 loss = train_step(batch)
+
                 pbar.set_description(f"Epoch {epoch}, Loss: {loss:.3f}")
             out = evaluation()
             print(out)
