@@ -483,7 +483,7 @@ class BaseDenovo:
                     wandb.log(out)
                     out.pop('epoch')
             else:
-                out = self.eval_out
+                out = self.eval_out if hasattr(self, 'eval_out') else self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)[0]
                 new_score = out[self.config["high_score"]]
             
             specifier = " ".join(len(out)*['%s'])
@@ -747,11 +747,14 @@ class DenovoDiffusionObj(BaseDenovo):
             wandb.log({'VLB loss': losses['vlb_terms'],})
    
     def on_train_epoch_end(self):
-        avg_losses = self.model.diff_obj.my_loss_history / (self.model.diff_obj.my_loss_count+1e-7)[...,None]
-        save_path = os.path.join(self.svdir, "train_loss_by_timestep.tab")
-        np.savetxt(save_path, avg_losses, delimiter='\t', fmt='%.8f')
-        self.model.diff_obj.my_loss_history = np.zeros((self.model.diff_obj.num_timesteps, 3))
-        self.model.diff_obj.my_loss_count = np.zeros((self.model.diff_obj.num_timesteps,))
+        try:
+            avg_losses = self.model.diff_obj.my_loss_history / (self.model.diff_obj.my_loss_count+1e-7)[...,None]
+            save_path = os.path.join(self.svdir, "train_loss_by_timestep.tab")
+            np.savetxt(save_path, avg_losses, delimiter='\t', fmt='%.8f')
+            self.model.diff_obj.my_loss_history = np.zeros((self.model.diff_obj.num_timesteps, 3))
+            self.model.diff_obj.my_loss_count = np.zeros((self.model.diff_obj.num_timesteps,))
+        except:
+            pass
     
     def on_eval_step_end(self, batch, out_dict, dataframe=None):
         if dataframe is None:
@@ -857,8 +860,6 @@ class DenovoMDLMObj(BaseDenovo):
         embedding = self.model.encoder_embedding(batch)
         
         model_kwargs = {
-            #'input_ids': None,
-            #'decoder_input_ids': target,
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
             'kv_features': embedding['emb'],
@@ -868,11 +869,12 @@ class DenovoMDLMObj(BaseDenovo):
         model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
         
         loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
-        # Logging token loss
-        discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
-        self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)
-        self.token_count[discrete_timesteps, :loss_mask.shape[1]] += (masked_token_mask & loss_mask).int()
-        #
+        
+        # Logging token loss - BEWARE OF MEMORY LEAK
+        #discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
+        #self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)
+        #self.token_count[discrete_timesteps, :loss_mask.shape[1]] += (masked_token_mask & loss_mask).int()
+        
         loss = loss[masked_token_mask]
         token_nll = loss.mean()
         #nll = loss * loss_mask
@@ -896,10 +898,13 @@ class DenovoMDLMObj(BaseDenovo):
 
     def on_train_epoch_end(self):
         if self.log:
-            avg_loss = self.token_loss / (self.token_count+1e-5)
-            avg_loss = avg_loss.cpu().detach().numpy()
-            np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
-            self.initialize_token_loss()
+            try:
+                avg_loss = self.token_loss / (self.token_count+1e-5)
+                avg_loss = avg_loss.cpu().detach().numpy()
+                np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
+                self.initialize_token_loss()
+            except:
+                pass
 
 if __name__ == '__main__':
     

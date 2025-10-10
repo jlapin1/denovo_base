@@ -26,7 +26,7 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
