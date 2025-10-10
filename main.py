@@ -420,7 +420,7 @@ class BaseDenovo:
                 tots['sum'][metric] += dn_metrics['sum'][metric]
                 tots['total'][metric] += dn_metrics['total'][metric]
 
-            self.on_eval_step_end(target, loss_mask, dataframe=dataframe)
+            #self.on_eval_step_end(target, loss_mask, dataframe=dataframe)
         
         steps = i+1
         totsz = self.config['batch_size']*steps
@@ -638,7 +638,7 @@ class DenovoDiffusionObj(BaseDenovo):
             classifier_config['diffdir'] = config['prev_wts']
             self.classifier = Classifier(
                 classifier_config['diffdir'],
-                num_input_tokens=config['decoder_diff']['model_config']['num_inp_tokens'],
+                num_input_tokens=len(self.model.decoder.outdict),
                 num_output_classes=classifier_config['num_output_classes'],
                 null_token=self.model.decoder.NT,
             )
@@ -1000,6 +1000,9 @@ if __name__ == '__main__':
         
         # Turn gradients off for de novo model
         for parm in D.model.parameters(): parm.requires_grad=False
+        
+        # Classifier guidance
+        no_grad = False if hasattr(D, 'classifier') else True
 
         # Run evaluation
         out, df = D.evaluation(
@@ -1007,7 +1010,7 @@ if __name__ == '__main__':
             max_batches=max_batches, 
             save_df=evc['save'], 
             stream_write=evc['stream'],
-            no_grad=True, 
+            no_grad=no_grad, 
             kwargs=D.eval_kwargs,
         )
         

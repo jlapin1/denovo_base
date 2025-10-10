@@ -6,7 +6,7 @@ eval_only:
   max_batches: 100
   save: True
   stream: False
-  outpath: ./hold2.parquet
+  outpath: ./conditional_chymotrypsin_1000.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing

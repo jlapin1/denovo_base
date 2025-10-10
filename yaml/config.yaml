@@ -1,4 +1,4 @@
-eval_only: False
+eval_only: True
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
@@ -22,7 +22,7 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: # Load weights from previous run (project path->timestamp)
+prev_wts: /cmnfs/proj/diffusion/experiments/2025-08-01_00-24-55 # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -38,12 +38,12 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /proj/bedrock/datasets/9_species_V2
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
   train_name:
-  val_dataset_path: /proj/bedrock/datasets/9_species_V2
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
   val_name: cerevisiae
-  masses_path: /proj/bedrock/datasets/9_species_V2
-  dictionary_path: /proj/bedrock/datasets/9_species_V2/ns_dictionary.tsv
+  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
@@ -207,7 +207,7 @@ decoder_mdlm:
 ############################
 # Leaving ckpt empty deactivate classifier guided diffusion
 classifier_config:
-  ckpt: #save/2025-04-09_16-07-11/weights/model_epoch=99_ce=0.9836847015079581.wts
-  num_output_classes: 9
-  class_index: 8
-  scale: 100
+  ckpt: save/2025-10-09_15-18-17/weights/model_epoch=14_ce=1.2132122764480224.wts
+  num_output_classes: 5
+  class_index: 1
+  scale: 1000
