@@ -250,6 +250,9 @@ class LoaderHF(LoaderObj):
         if 'remove_columns' in kwargs:
             remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
             remove_val_columns = [column for column in kwargs['remove_columns'] if column in dataset['val'].features]
+        else:
+            remove_train_columns = []
+            remove_val_columns = []
         dataset['train'] = dataset['train'].map(
             lambda_function, 
             remove_columns=remove_train_columns,

@@ -524,13 +524,13 @@ class GaussianDiffusion:
             terms['vlb_terms'] = vlb_terms
             terms['loss'] += self.vlb_weight * vlb_terms
 
-        # My loss tracking
-        ts_cpu = ts.detach().cpu()
-        self.my_loss_history[ts_cpu] = (
-            np.take(self.my_loss_history, ts_cpu, axis=0) + 
-            th.stack([terms['mse'].detach().cpu(), decoder_nll.detach().cpu(), tT_loss.detach().cpu()]).numpy().T
-        )
-        self.my_loss_count[ts_cpu] += 1
+        # My loss tracking - BEWARE OF MEMORY LEAK
+        #ts_cpu = ts.detach().cpu()
+        #self.my_loss_history[ts_cpu] = (
+        #    np.take(self.my_loss_history, ts_cpu, axis=0) + 
+        #    th.stack([terms['mse'].detach().cpu(), decoder_nll.detach().cpu(), tT_loss.detach().cpu()]).numpy().T
+        #)
+        #self.my_loss_count[ts_cpu] += 1
 
         return terms
 
