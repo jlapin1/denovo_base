@@ -2,11 +2,11 @@
 eval_only:
   eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
   eval_name: cerevisiae
-  set: test
+  set: test # key name in D.data.dataloader/dataset
   max_batches: 100
   save: True
-  stream: False
-  outpath: ./conditional_chymotrypsin_1000.parquet
+  stream: True
+  outpath: /cmnfs/proj/diffusion/experiments/2025-10-07_22-25-53/kingdoms_cerevisiae_100.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing

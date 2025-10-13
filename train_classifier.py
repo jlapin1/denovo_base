@@ -55,6 +55,9 @@ def main():
     print(f"<MAINCOMMENT> Total classifier parameters: {classifier.total_params():,}")
 
     opt = th.optim.Adam(classifier.parameters(), 1e-5)
+    
+    weights_path = "/cmnfs/proj/diffusion/experiments/2025-08-01_00-24-55/enzyme_classifier/weights/model_epoch=14_ce=1.2132122764480224.wts"
+    classifier.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
     ##############
     # Evaluation #
@@ -88,16 +91,17 @@ def main():
                 cross_entropy_loss = nn.functional.binary_cross_entropy_with_logits(out, batchdev['labels'].type(th.float32), reduction='none')
                 sums[f'ce_{t}'] += cross_entropy_loss.sum()
 
-               # sums[f'correct_{t}'] += (out.argmax(-1) == batchdev['labels']).sum()
+                #sums[f'correct_{t}'] += (out.argmax(-1) == batchdev['labels']).sum()
+                sums[f'correct_{t}'] += batch['labels'].gather(1, out.argmax(1)[:,None]).squeeze().sum().int().item()
 
         
         # Averages
         out = {'ce_all': 0, 'accuracy_all': 0}
         for t in T:
             out[f'ce_{t}'] = float(sums[f'ce_{t}'])    / sums[f'total_inst']
-            #out[f'accuracy_{t}'] = int(sums[f'correct_{t}']) / sums[f'total_inst']
+            out[f'accuracy_{t}'] = int(sums[f'correct_{t}']) / sums[f'total_inst']
             out['ce_all'] += out[f'ce_{t}']
-            #out['accuracy_all'] += out[f'accuracy_{t}']
+            out['accuracy_all'] += out[f'accuracy_{t}']
         out['ce_all'] /= len(T)
         out['accuracy_all'] /= len(T)
 
@@ -152,7 +156,7 @@ def main():
                 for file in files: os.remove(file)
                 ckpt_name = f"model_epoch={epoch}_ce={best_score}.wts"
                 save_weights(classifier, os.path.join(weights_directory, ckpt_name))
-
+    #print(evaluation())
     train(100)
 
 def save_weights(model, fp='./model.wts'):

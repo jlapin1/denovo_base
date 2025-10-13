@@ -22,16 +22,16 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2025-08-01_00-24-55 # Load weights from previous run (project path->timestamp)
+prev_wts: /cmnfs/proj/diffusion/experiments/2025-10-07_22-25-53 # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -39,12 +39,12 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/InstaNovo
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/InstaNovo
   val_name: cerevisiae
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/InstaNovo/dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
@@ -208,7 +208,7 @@ decoder_mdlm:
 ############################
 # Leaving ckpt empty deactivate classifier guided diffusion
 classifier_config:
-  ckpt: save/2025-10-09_15-18-17/weights/model_epoch=14_ce=1.2132122764480224.wts
+  ckpt: #/cmnfs/proj/diffusion/experiments/2025-08-01_00-24-55/enzyme_classifier/weights/model_epoch=14_ce=1.2132122764480224.wts
   num_output_classes: 5
-  class_index: 1
+  class_index: 4
   scale: 1000

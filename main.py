@@ -113,7 +113,7 @@ class BaseDenovo:
             self.high_score = score
             ext = f"step{self.global_step}_high_{self.high_score:.3f}"
             wtsdir = os.path.join(self.svdir, "weights")
-            for file in glob(os.path.join(wtsdir, "high")): os.remove(file)
+            for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
             self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
 
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
@@ -969,6 +969,7 @@ if __name__ == '__main__':
                 # These must be consistent with embedding layer in decoder
                 config_[key]['synonyms'] = config[key]['synonyms']
                 config_[key]['dictionary_path'] = config[key]['dictionary_path']
+                config_[key]['reverse'] = config[key]['reverse']
             config[key] = config_[key]
             
     # Create new experiment
