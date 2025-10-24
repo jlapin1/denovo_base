@@ -679,7 +679,7 @@ class Diffusion:
       for i in pbar:
           t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
           dt = timesteps[i] - timesteps[i+1]
-          model_kwargs['timesteps'] = t
+          #model_kwargs['timesteps'] = t # Set in self.forward()
           top = self.config['sampling']['top'] if top is None else top
 
           if self.sampler == 'ddpm':
@@ -869,7 +869,7 @@ class Diffusion:
                           index=x0[:, :, None]).squeeze(-1)
 
   def _forward_pass_diffusion(self, backbone, x0, model_kwargs):
-    t = self._sample_t(x0.shape[0], x0.device)
+    t = self._sample_t(x0.shape[0], x0.device)#[torch.randperm(x0.shape[0])]
     if self.T > 0:
       t = (t * self.T).to(torch.int)
       t = t / self.T

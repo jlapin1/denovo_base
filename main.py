@@ -425,8 +425,8 @@ class BaseDenovo:
                 dataframe['correct_peptide'].extend([result[1] for result in aa_matches_batch])
 				
                 if stream_write and ((i+1) % batches_btw_write == 0):
-                    
-                    table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
+                    dataframe_ = {key: value for key, value in dataframe.items() if len(value)>0}   
+                    table = pa.Table.from_pandas(pd.DataFrame(dataframe_), preserve_index=False)
                     if not schema_defined:
                         writer = pq.ParquetWriter('./hold.parquet', table.schema, compression='snappy')
                         schema_defined = True
@@ -780,6 +780,7 @@ class DenovoMDLMObj(BaseDenovo):
             rddir=rddir,
         )
         self.training_loss_keys.extend(['loss'])
+        #self.eval_kwargs = {'num_steps': 2}
 
         from models.seq2seq import Seq2SeqMDLM
         
@@ -868,7 +869,7 @@ class DenovoMDLMObj(BaseDenovo):
         backbone = self.model.decoder
         model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
         
-        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
+        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none') #* th.linspace(10, 1, target.shape[0], device=device)[:,None]
         
         # Logging token loss - BEWARE OF MEMORY LEAK
         #discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)

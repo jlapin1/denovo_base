@@ -512,7 +512,7 @@ class MDLMDecoder(base_diffusion_decoder):
 
         return out
     
-    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, progress=False):
+    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
         model_kwargs = {
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
@@ -521,7 +521,8 @@ class MDLMDecoder(base_diffusion_decoder):
         out = self.diff_obj._sample(
             save_x=save_x, 
             save_p=save_p, 
-            top=top, 
+            top=top,
+            num_steps=num_steps,
             progress=progress, 
             model_kwargs=model_kwargs
         )

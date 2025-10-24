@@ -316,7 +316,7 @@ class Seq2SeqMDLM(Seq2Seq):
 
     def calculate_min_peptide_prob(self, prediction, logits_in_time, sl_mask):
         bs, steps, sl, cats = logits_in_time.shape
-        min_conf_ = logits_in_time.gather(-1, prediction[:,None,:,None].tile([1,steps,1,1])).squeeze().min(dim=1)[0]
+        min_conf_ = logits_in_time.gather(-1, prediction[:,None,:,None].tile([1,steps,1,1]))[...,0].min(dim=1)[0]
         return min_conf_, (min_conf_*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9)
 
     def calculate_entropy_prob(self, logits_in_time, reveal_mask, sl_mask):
@@ -325,11 +325,11 @@ class Seq2SeqMDLM(Seq2Seq):
         pep_entropy = (aa_entropy*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9) # average over sequence length
         return aa_entropy, pep_entropy
 
-    def forward(self, batch, top=None, save_x=False, save_p=False, progress=False, **kwargs):
+    def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
         dictionary = self.encoder_embedding(batch)
         embedding = dictionary['emb']
         spectrum_mask = dictionary['mask']
-        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, progress=progress)
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
         return decout
 
     def predict_sequence(
@@ -337,6 +337,7 @@ class Seq2SeqMDLM(Seq2Seq):
         batch: dict,             # batch of inputs
         save_x: bool=False,      # return the intseqs at every step
         save_p: bool=False,      # return the logits at every step
+        num_steps: int=None,     # number of sampling steps in decoder
         top: int=None,           # top categorical sampling; None defaults to config.yaml setting
         n: int=None,             # return n sequences per batch member; None defaults to config.yaml setting
         return_full: dict=False, # return n outputs for each batch member (instead of 1/top sequence)
@@ -348,7 +349,7 @@ class Seq2SeqMDLM(Seq2Seq):
         batch = expand_batch(batch, n=n)
         
         # Model outputs
-        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, progress=progress)
+        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
         seqs = diffout.pop('prediction')
         logits = diffout.pop('logits')
         
