@@ -48,8 +48,8 @@ def collate_fn(batch_list):
     mass = np.stack([m['precursor_mass'] for m in batch_list])
     peplen = np.stack([m['peptide_length'] for m in batch_list])
     intseq = np.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
-    chimeric = np.stack([m['chimeric'] for m in batch_list]) if 'chimeric' in batch_list[0].keys() else []
-    hyperscore = np.stack([m['Hyperscore'] for m in batch_list]) if 'Hyperscore' in batch_list[0].keys() else []
+    chimeric = np.stack([m['chimeric'] for m in batch_list]) if 'chimeric' in batch_list[0].keys() else len(batch_list)*['missing']
+    hyperscore = np.stack([m['Hyperscore'] for m in batch_list]) if 'Hyperscore' in batch_list[0].keys() else len(batch_list)*['missing']
 
     out = {
         'experiment_name': species,
@@ -304,7 +304,7 @@ class LoaderHF(LoaderObj):
         # Filter val set for dispersed examples
         if 'val_steps' in kwargs.keys():
             if kwargs['val_steps'] is not None:
-                every_n = self.val_size // batch_size // kwargs['val_steps'] - 1 # minus 1 to be safe (charge and length filter make dataset shorter)
+                every_n = np.maximum(1, self.val_size // batch_size // kwargs['val_steps'] - 1) # minus 1 to be safe (charge and length filter make dataset shorter)
                 dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
         
         # Shuffle the dataset

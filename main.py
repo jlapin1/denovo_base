@@ -423,6 +423,11 @@ class BaseDenovo:
                 dataframe['pred_aaseq'].extend(pred_strings)
                 dataframe['correct_aa'].extend([result[0] for result in aa_matches_batch])
                 dataframe['correct_peptide'].extend([result[1] for result in aa_matches_batch])
+                
+                # Prevent error at the end of evaluation when not streaming
+                length_first = len(dataframe['name'])
+                array = np.array([len(value) for key, value in dataframe.items()])
+                assert (length_first == array).all(), f"batch#: {i}, {dataframe.keys()}, {array}"
 				
                 if stream_write and ((i+1) % batches_btw_write == 0):
                     dataframe_ = {key: value for key, value in dataframe.items() if len(value)>0}   
