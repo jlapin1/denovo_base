@@ -1,6 +1,7 @@
 eval_only: True
+inference: True
 batch_size: 100
-top_peaks: 100
+top_peaks: 200
 pep_length: [0, 40]
 epochs: 100
 
@@ -22,16 +23,16 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2025-10-14_17-25-21 # Load weights from previous run (project path->timestamp)
+prev_wts: #/cmnfs/proj/diffusion/experiments/2025-11-08_16-38-18 # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -39,12 +40,12 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/InstaNovo
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   train_name: train
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/InstaNovo
-  val_name: val
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/inference
+  val_name: barley
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V2/ns_dictionary.tsv
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
@@ -66,7 +67,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 

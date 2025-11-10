@@ -1,12 +1,15 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
-  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2 # None: use config.yaml setting, else: override
-  eval_name: cerevisiae
+  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/inference # None: use config.yaml setting, else: override
+  eval_name: barley
+  custom_columns:
+    - 'file_index'
+    - 'scan'
   set: test # key name in D.data.dataloader/dataset
   max_batches:
   save: True
   stream: True
-  outpath: ./saccharomyces_results.parquet
+  outpath: ./inference_barley.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing

@@ -27,42 +27,36 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
     example['intensity_array'] = ab_
     example['precursor_charge'] = example['precursor_charge']
     example['precursor_mass'] = example['precursor_mass']
-    example['spectrum_length'] = len(example['mz_array'])
-    tokenized_sequence = tokenizer(example['modified_sequence'])
-    peptide_length = len(tokenized_sequence)
-    if reverse:
-        tokenized_sequence = tokenized_sequence[::-1]
-    example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
-    example['peptide_length'] = peptide_length
-    example['spectrum_length'] = spectrum_length
+    example['spectrum_length'] = spectrum_length #len(example['mz_array'])
+    if 'modified_sequence' in example:
+        tokenized_sequence = tokenizer(example['modified_sequence'])
+        peptide_length = len(tokenized_sequence)
+        if reverse:
+            tokenized_sequence = tokenized_sequence[::-1]
+        example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
+        example['peptide_length'] = peptide_length
     if 'name' in example: example['experiment_name'] = example['name'] # compat
 
     return example
 
-def collate_fn(batch_list):
-    species = [m['experiment_name'] for m in batch_list]
-    speclen = np.stack([m['spectrum_length'] for m in batch_list])
-    mz = np.stack([m['mz_array'][:speclen.max()] for m in batch_list])
-    ab = np.stack([m['intensity_array'][:speclen.max()] for m in batch_list])
-    charge = np.stack([m['precursor_charge'] for m in batch_list])
-    mass = np.stack([m['precursor_mass'] for m in batch_list])
-    peplen = np.stack([m['peptide_length'] for m in batch_list])
-    intseq = np.stack([m['tokenized_sequence'][:peplen.max()] for m in batch_list])
-    chimeric = np.stack([m['chimeric'] for m in batch_list]) if 'chimeric' in batch_list[0].keys() else len(batch_list)*['missing']
-    hyperscore = np.stack([m['Hyperscore'] for m in batch_list]) if 'Hyperscore' in batch_list[0].keys() else len(batch_list)*['missing']
-
-    out = {
-        'experiment_name': species,
-        'mz': th.tensor(mz, dtype=th.float32),
-        'ab': th.tensor(ab, dtype=th.float32),
-        'charge': th.tensor(charge, dtype=th.int32),
-        'mass': th.tensor(mass, dtype=th.float32),
-        'length': th.tensor(speclen, dtype=th.int32),
-        'intseq': th.tensor(intseq, dtype=th.int32),
-        'peplen': th.tensor(peplen, dtype=th.int32),
-        'chimeric': chimeric,
-        'hyperscore': hyperscore,
-    }
+def collate_fn(batch_list, custom_columns=[]):
+    out = {}
+    out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
+    out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
+    maxlength = out['length'].max()
+    out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
+    out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
+    if 'tokenized_sequence' in batch_list[0].keys():
+        out['peplen'] = th.tensor(np.stack([m['peptide_length'] for m in batch_list]), dtype=th.int32)
+        out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)
+    if 'chimeric' in batch_list[0].keys():
+        out['chimeric'] = th.tensor(np.stack([m['chimeric'] for m in batch_list]))
+    if 'Hyperscore' in batch_list[0]:
+        out['hyperscore'] = th.tensor(np.stack([m['Hyperscore'] for m in batch_list]))
+    for column in custom_columns:
+        out[column] = np.array([m[column] for m in batch_list])
 
     return out
 
@@ -180,20 +174,23 @@ class LoaderHF(LoaderObj):
         tokenizer_path: str=None,
         test_split_method: str='full_val',
         top_pks: int=100,
+        pep_length: list=[0,40],
         reverse: bool=False,
         batch_size: int=100,
         num_workers: int=0,
+        custom_columns: list=[],
         **kwargs
     ):
 
         dpe = "parquet/processed"
+        self.custom_columns = []
 
         if val_dataset_path is None:
             val_dataset_path = train_dataset_path
         if masses_path is None:
             masses_path = train_dataset_path
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
-        max_seq = kwargs['pep_length'][1] if 'pep_length' in kwargs.keys() else None
+        max_seq = pep_length[1] if pep_length is not None else None
         
         ##############
         # Dictionary #
@@ -282,20 +279,20 @@ class LoaderHF(LoaderObj):
         #############
         # Filtering #
         #############
-        # Filter for length
-        if 'pep_length' in kwargs.keys():
-            dataset = dataset.filter(
-                lambda example: 
-                (len(example['tokenized_sequence']) >= kwargs['pep_length'][0]) &
-                (len(example['tokenized_sequence']) <= kwargs['pep_length'][1])
-            )
-        
         # Filter for charge
         if 'charge' in kwargs.keys():
             dataset = dataset.filter(
                 lambda example:
                 (example['precursor_charge'] >= kwargs['charge'][0]) &
                 (example['precursor_charge'] <= kwargs['charge'][1])
+            )
+
+        # Filter for length
+        if pep_length is not None:
+            dataset = dataset.filter(
+                lambda example: 
+                (len(example['tokenized_sequence']) >= pep_length[0]) &
+                (len(example['tokenized_sequence']) <= pep_length[1])
             )
         
         # Chimeric
@@ -319,10 +316,11 @@ class LoaderHF(LoaderObj):
         # Dataloaders #
         ###############
         num_workers = min(self.dataset['train'].n_shards, num_workers)
+        eval_collate_function = lambda x: collate_fn(x, custom_columns=custom_columns)
         self.dataloader = {
             'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn),
-            'val':   self.build_dataloader(dataset['val']  , batch_size, 0, collate_fn),
-            'test':  self.build_dataloader(dataset['test'] , batch_size, 0, collate_fn),
+            'val':   self.build_dataloader(dataset['val']  , batch_size, 0, eval_collate_function),
+            'test':  self.build_dataloader(dataset['test'] , batch_size, 0, eval_collate_function),
         }
 
 class LoaderCls(LoaderObj):
