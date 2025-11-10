@@ -306,6 +306,94 @@ class BaseDenovo:
             for m in intseq
         ]
 
+    def inference(
+        self,
+        output_filename="./hold.parquet",
+        dset='val',
+        max_batches=1e10,
+        stream_write=False,
+        batches_btw_write=10,
+        no_grad=True,
+        kwargs={},
+        save_keys=[],
+    ):
+        schema_defined = False
+
+        def initial_dataframe(additional_keys: list=[]):
+            out = {
+                #'pred_intseq': [], 
+                'pred_aaseq': [], 
+                'probs': []
+            }
+            return out
+        dataframe = initial_dataframe()
+        
+        # Progress bar
+        val_steps = min(
+            self.data.val_size // self.data.dataloader[dset].batch_size,
+            max_batches,
+        )
+        pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=True)
+        pbar.set_description(f"Inference")
+        self.model.eval()
+        for i, batch in enumerate(pbar):
+            
+            if i == max_batches:
+                break
+
+            #print("\rEvaluation step %d"%(i+1), end='')
+            batchdev = U.Dict2dev(batch, device)
+            if no_grad:
+                with th.no_grad():
+                    #seqint, target, loss_mask = self.inptarg(batchdev)
+                    out_dict = self.model.predict_sequence(batchdev, **kwargs)
+            else:
+                #seqint, target, loss_mask = self.inptarg(batchdev)
+                out_dict = self.model.predict_sequence(batchdev, **kwargs)
+            
+            # process prediction
+            prediction = out_dict.pop('prediction')
+            prediction = self.fill_null_after_first_eos_token(prediction)
+            pred_strings = self.to_list_of_strings(prediction)
+            
+            # Process lgoits
+            probs = out_dict.pop('logits')
+            predicted_probs = probs.softmax(-1).gather(-1, prediction[...,None]).squeeze()
+            
+            # Collect results
+            #dataframe['pred_intseq'].extend(prediction.cpu().numpy().tolist())
+            dataframe['pred_aaseq'].extend(pred_strings)
+            dataframe['probs'].extend(predicted_probs.cpu().numpy())
+            combined_dict = batch | out_dict
+            for key in save_keys:
+                value = combined_dict[key]
+                valuetype = type(value)
+                if key not in dataframe:
+                    dataframe[key] = []
+                if valuetype == list:
+                    dataframe[key].extend(value)
+                elif valuetype == np.ndarray:
+                    dataframe[key].extend(value)
+                elif valuetype == th.Tensor:
+                    dataframe[key].extend(value.cpu().numpy())
+                else:
+                    dataframe[key].extend(value)
+                
+            # Prevent error at the end of evaluation when not streaming
+            length_first = len(dataframe['pred_aaseq'])
+            array = np.array([len(value) for key, value in dataframe.items()])
+            assert (length_first == array).all(), f"batch#: {i}, {dataframe.keys()}, {array}"
+            
+            if stream_write and ((i+1) % batches_btw_write == 0):
+                dataframe_ = {key: value for key, value in dataframe.items() if len(value)>0}   
+                table = pa.Table.from_pandas(pd.DataFrame(dataframe_), preserve_index=False)
+                if not schema_defined:
+                    writer = pq.ParquetWriter(f'{output_filename}', table.schema, compression='snappy')
+                    schema_defined = True
+                writer.write_table(table)
+                dataframe = initial_dataframe()
+        writer.close()
+
     def evaluation(
         self, 
         dset='val', 
@@ -321,8 +409,8 @@ class BaseDenovo:
         def initial_dataframe(extra_keys: list=[]):
             dataframe = {
                 'name': [],
-                'chimeric': [],
-                'hyperscore': [],
+                #'chimeric': [],
+                #'hyperscore': [],
                 'targ_intseq': [],
                 'charge': [],
                 'mass': [],
@@ -352,10 +440,10 @@ class BaseDenovo:
             max_batches,
         )
         pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=False)
-        
+        pbar.set_description(f"Evaluation")
         self.model.eval()
         for i, batch in enumerate(pbar):
-            pbar.set_description(f"Evaluation")
+            
             if i == max_batches:
                 break
 
@@ -411,8 +499,12 @@ class BaseDenovo:
             if save_df or stream_write:
                 self.on_eval_step_end(batchdev, out_dict, dataframe)
                 dataframe['name'].extend(batch['experiment_name'])
-                dataframe['chimeric'].extend(batch['chimeric'])
-                dataframe['hyperscore'].extend(batch['hyperscore'])
+                if 'chimeric' in batch:
+                    if 'chimeric' not in dataframe: dataframe['chimeric'] = []
+                    dataframe['chimeric'].extend(batch['chimeric'])
+                if 'hyperscore' in batch:
+                    if 'hyperscore' not in dataframe: dataframe['hyperscore'] = []
+                    dataframe['hyperscore'].extend(batch['hyperscore'])
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
                 dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
                 dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
@@ -785,7 +877,7 @@ class DenovoMDLMObj(BaseDenovo):
             rddir=rddir,
         )
         self.training_loss_keys.extend(['loss'])
-        #self.eval_kwargs = {'num_steps': 2}
+        self.eval_kwargs = {}
 
         from models.seq2seq import Seq2SeqMDLM
         
@@ -969,7 +1061,7 @@ if __name__ == '__main__':
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'lr_flat_steps', 'lr_floor', 'lr_decay_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
-            'top_peaks', 'classifier_config', 'new_exp',
+            'top_peaks', 'classifier_config', 'new_exp', 'inference',
         ]:
             if key == 'loader':
                 # These must be consistent with embedding layer in decoder
@@ -992,7 +1084,8 @@ if __name__ == '__main__':
     if config['eval_only']:
         config['loader']['val_dataset_path'] = evconfig['eval_only']['eval_dataset_path']
         config['loader']['val_name'] = evconfig['eval_only']['eval_name']
-        config['loader']['custom_columns'] = evconfig['eval_only']['custom_columns']
+        cc = evconfig['eval_only']['loader_custom_columns']
+        config['loader']['custom_columns'] = [] if cc == None else cc
     
     #####################
     # Downstream object #
@@ -1030,7 +1123,7 @@ if __name__ == '__main__':
         
         # Apply settings that are independent of training
         max_batches = int(eval(str(evc['max_batches'] if evc['max_batches'] is not None else 9e10)))
-        if 'diff' in config['decoder_name']:
+        if config['decoder_name'] in ['diff', 'mdlm']:
             if evc['clamp_denoised'] is not None:
                 D.model.decoder.clamp_denoised = evc['clamp_denoised']
             if evc['n'] is not None:
@@ -1044,14 +1137,25 @@ if __name__ == '__main__':
         no_grad = False if hasattr(D, 'classifier') else True
 
         # Run evaluation
-        out, df = D.evaluation(
-            dset=evc['set'], 
-            max_batches=max_batches, 
-            save_df=evc['save'], 
-            stream_write=evc['stream'],
-            no_grad=no_grad, 
-            kwargs=D.eval_kwargs,
-        )
+        if config['inference']:
+            D.inference(
+                output_filename=evc['outpath'],
+                dset=evc['set'],
+                max_batches=max_batches,
+                stream_write=evc['stream'],
+                no_grad=no_grad,
+                kwargs=D.eval_kwargs|dict(evc['eval_kwargs']),
+                save_keys=evconfig['inference_save_keys'],
+            )
+        else:
+            out, df = D.evaluation(
+                dset=evc['set'], 
+                max_batches=max_batches, 
+                save_df=evc['save'], 
+                stream_write=evc['stream'],
+                no_grad=no_grad, 
+                kwargs=D.eval_kwargs,
+            )
         
         # Saving results
         if evc['save']:
@@ -1063,7 +1167,7 @@ if __name__ == '__main__':
         print("\n", out)
     else:
         print("Test validation", end='')
-        #out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-        #assert D.config['high_score'] in out.keys()
+        out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])

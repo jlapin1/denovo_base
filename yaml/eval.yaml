@@ -2,7 +2,7 @@
 eval_only:
   eval_dataset_path: /cmnfs/data/proteomics/foundational_model/inference # None: use config.yaml setting, else: override
   eval_name: barley
-  custom_columns:
+  loader_custom_columns:
     - 'file_index'
     - 'scan'
   set: test # key name in D.data.dataloader/dataset
@@ -13,5 +13,17 @@ eval_only:
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing
+  eval_kwargs:
+    save_x: True
+    save_p: True
+inference_save_keys:
+  - experiment_name
+  - file_index
+  - scan
+  - length
+  - charge
+  - mass
+  - aa_prob_min
+  - pep_prob_min
 eval_train: 
   set: val

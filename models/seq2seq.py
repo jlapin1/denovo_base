@@ -75,10 +75,12 @@ def expand_batch(batch, n=1):
     bs, sl = batch['mz'].shape
     batch['mz'] = batch['mz'][:,None].tile(1, n, 1).reshape(-1, sl)
     batch['ab'] = batch['ab'][:,None].tile(1, n, 1).reshape(-1, sl)
-    batch['length'] = batch['length'][:,None].tile(1, n).reshape(-1)
     batch['charge'] = batch['charge'][:,None].tile(1, n).reshape(-1)
     batch['mass'] = batch['mass'][:,None].tile(1, n).reshape(-1)
-    batch['peplen'] = batch['peplen'][:,None].tile(1, n).reshape(-1)
+    if 'length' in batch:
+        batch['length'] = batch['length'][:,None].tile(1, n).reshape(-1)
+    if 'peplen' in batch:
+        batch['peplen'] = batch['peplen'][:,None].tile(1, n).reshape(-1)
     return batch
 
 def mass_objects(masses_path, output_dictionary):
