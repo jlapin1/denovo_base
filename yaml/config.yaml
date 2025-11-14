@@ -1,7 +1,7 @@
 eval_only: True
-inference: True
+inference: False
 batch_size: 100
-top_peaks: 200
+top_peaks: 100
 pep_length: [0, 40]
 epochs: 100
 
@@ -23,7 +23,7 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/home/j.lapin/projects/denovo_base/save/2025-11-08_16-38-18 # Load weights from previous run (project path->timestamp)
+prev_wts: /cmnfs/proj/diffusion/experiments/2025-11-04_06-47-44 # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights

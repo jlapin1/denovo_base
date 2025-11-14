@@ -1086,6 +1086,7 @@ if __name__ == '__main__':
         config['loader']['val_name'] = evconfig['eval_only']['eval_name']
         cc = evconfig['eval_only']['loader_custom_columns']
         config['loader']['custom_columns'] = [] if cc == None else cc
+        config['loader']['val_steps'] = evconfig['eval_only']['val_steps']
     
     #####################
     # Downstream object #
@@ -1157,14 +1158,14 @@ if __name__ == '__main__':
                 kwargs=D.eval_kwargs,
             )
         
-        # Saving results
-        if evc['save']:
-            eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
-            if evc['stream']:
-                os.system(f"mv ./hold.parquet {eval_out_path}")
-            else:
-                df.to_parquet(eval_out_path)
-        print("\n", out)
+            # Saving results
+            if evc['save']:
+                eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
+                if evc['stream']:
+                    os.system(f"mv ./hold.parquet {eval_out_path}")
+                else:
+                    df.to_parquet(eval_out_path)
+            print("\n", out)
     else:
         print("Test validation", end='')
         out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)

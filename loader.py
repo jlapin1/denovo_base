@@ -301,8 +301,12 @@ class LoaderHF(LoaderObj):
         # Filter val set for dispersed examples
         if 'val_steps' in kwargs.keys():
             if kwargs['val_steps'] is not None:
-                every_n = np.maximum(1, self.val_size // batch_size // kwargs['val_steps'] - 1) # minus 1 to be safe (charge and length filter make dataset shorter)
+                every_n_ = self.val_size // batch_size // kwargs['val_steps']
+                if every_n_ > 2:
+                    every_n_ -= 1 # minus 1 to be safe (charge and length filter make dataset shorter)
+                every_n = np.maximum(1, every_n_) 
                 dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
+                self.val_size = kwargs['val_steps'] * batch_size
         
         # Shuffle the dataset
         if 'buffer_size' in kwargs.keys():
