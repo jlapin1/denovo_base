@@ -26,12 +26,12 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -158,7 +158,7 @@ decoder_diff:
     precursor_dimension: 128
     use_charge: True
     use_mass: True
-    use_leftover: True
+    use_leftover: False
     use_energy: False
     prec_type: None
     norm_type: 'layer'

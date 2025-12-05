@@ -446,6 +446,7 @@ class MDLMDecoder(base_diffusion_decoder):
             kv_input_dimension=decoder_config['kv_indim'],
             use_charge=use_charge,
             use_mass=use_mass,
+            use_leftover=use_leftover,
             precursor_dimension=precursor_dimension,
         )
         self.finish_dict()
