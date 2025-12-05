@@ -63,7 +63,7 @@ class base_diffusion_decoder(nn.Module):
         depth=6,
         use_charge=True,
         use_mass=True,
-        use_leftover=True,
+        use_leftover=False,
         precursor_dimension=128,
     ):
         super(base_diffusion_decoder, self).__init__()
@@ -480,6 +480,7 @@ class MDLMDecoder(base_diffusion_decoder):
         )
 
     def finish_dict(self):
+        self.outdict['<SOS>'] = int(get_max_dic_value(self.outdict)) # TODO backwards compat. for checkpoints prior to Dec2025 REMOVE once you have new weights.
         self.outdict['<MASK>'] = int(get_max_dic_value(self.outdict))
         self.MASK = self.outdict['<MASK>']
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
