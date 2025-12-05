@@ -298,6 +298,13 @@ class Scale:
             masses = masses[None].tile([intseq.shape[0], 1])
         return th.gather(masses, gatherdim, intseq.type(th.int64)).sum(sumdim)
 
+    def intseq2mz(self, intseq, charge):
+        total_mass = self.intseq2mass(intseq)
+        mask = total_mass == 0
+        mz = (total_mass + 18.010565) / charge + 1.00727646688
+        mz[mask] = 0
+        return mz
+
     def modseq2mass(self, modified_sequence):
         return np.sum(
             self.tok2mass[tok] for tok in partition_seq(modified_sequence)['seq']

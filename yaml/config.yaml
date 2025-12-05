@@ -23,7 +23,7 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2025-11-04_06-47-44 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -159,6 +159,7 @@ decoder_diff:
     precursor_dimension: 128
     use_charge: True
     use_mass: True
+    use_leftover: False
     use_energy: False
     prec_type: None
     norm_type: 'layer'
