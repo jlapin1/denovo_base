@@ -87,7 +87,6 @@ class Diffusion:
     self.change_of_variables = self.config['training']['change_of_variables']
     
     self.mask_index = dictionary['<MASK>']
-    self.bos_token_id = dictionary['<SOS>']
     self.eos_token_id = dictionary['<EOS>']
     self.NT = dictionary['X']
     self.parameterization = self.config['parameterization']

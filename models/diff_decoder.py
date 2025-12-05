@@ -63,6 +63,7 @@ class base_diffusion_decoder(nn.Module):
         depth=6,
         use_charge=True,
         use_mass=True,
+        use_leftover=True,
         precursor_dimension=128,
     ):
         super(base_diffusion_decoder, self).__init__()
@@ -80,6 +81,7 @@ class base_diffusion_decoder(nn.Module):
         self.scale = Scale(self.outdict)
 
         self.use_mass = use_mass
+        self.use_leftover = use_leftover
         self.use_charge = use_charge
                 
         self.precursor_dimension = precursor_dimension
@@ -98,16 +100,16 @@ class base_diffusion_decoder(nn.Module):
         ##############
         self.use_charge = use_charge
         self.use_mass = use_mass
-        self.atleast1 = True if (use_charge or use_mass) else False
+        self.atleast1 = True if (use_charge or use_mass or use_leftover) else False
         if self.atleast1:
             self.added_tokens = 1
-            num = sum([use_charge, use_mass])
+            num = sum([use_charge, use_mass, use_leftover])
             if use_charge:
                 #charge_embedder = nn.Embedding(8, embedding_dimension)
                 self.charge_features = lambda charge: (
                     mp.FourierFeatures(charge, 1, 10, precursor_dimension)
                 )
-            if use_mass:
+            if use_mass | use_leftover:
                 self.mass_features = lambda mass: (
                     mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
@@ -167,7 +169,7 @@ class base_diffusion_decoder(nn.Module):
     def AddPosEmbed(self, seq_emb):
         return seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
 
-    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None):
+    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None, seq=None):
         
         # Add position to sequence
         out = self.AddPosEmbed(seq_emb)
@@ -180,6 +182,10 @@ class base_diffusion_decoder(nn.Module):
                 ce_emb.append(self.charge_features(charge))
             if self.use_mass:
                 ce_emb.append(self.mass_features(mass))
+            if self.use_leftover:
+                mass_so_far = self.scale.intseq2mz(seq, charge)
+                leftover_mass = mass - mass_so_far
+                ce_emb.append(self.mass_features(leftover_mass))
             if len(ce_emb) > 1:
                 ce_emb = th.cat(ce_emb, dim=-1)
             ce_emb = self.precursor_emb(ce_emb)
@@ -417,6 +423,7 @@ class MDLMDecoder(base_diffusion_decoder):
         alphabet=False,
         use_charge=False,
         use_mass=False,
+        use_leftover=False,
         prenorm=False,
         self_condition=True,
         output_sigma=False,
@@ -472,11 +479,11 @@ class MDLMDecoder(base_diffusion_decoder):
         )
 
     def finish_dict(self):
-        self.outdict['<SOS>'] = get_max_dic_value(self.outdict) #TODO REMOVE THIS
-        self.outdict['<MASK>'] = get_max_dic_value(self.outdict)
+        self.outdict['<MASK>'] = int(get_max_dic_value(self.outdict))
         self.MASK = self.outdict['<MASK>']
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = get_max_dic_value(self.outdict)
+        self.scale = Scale(self.outdict)
 
     def forward(self,
         x,
@@ -494,7 +501,7 @@ class MDLMDecoder(base_diffusion_decoder):
         seq_emb = self.embed_sequence(x)
         if self.self_condition:
             seq_emb += self.embed_self_conditions(self_conditions)
-        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass) # position added inside
+        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass, seq=x) # position added inside
         emb = self.proj_begin(emb)
         
         # Middle
