@@ -1,20 +1,21 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
-  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2 # None: use config.yaml setting, else: override
-  eval_name: mus_musculus
+  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
+  eval_name: cerevisiae
   loader_custom_columns:
     #- 'file_index'
     #- 'scan'
   set: val # key name in D.data.dataloader/dataset
-  val_steps: 100 # only for the set: val
+  val_steps: # only for the set: val
   max_batches:
   save: True
-  stream: False
-  outpath: ./mdlm_mumu.parquet
+  stream: True
+  outpath: ./mdlm_kingdomsSC_20steps.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing
   eval_kwargs:
+    num_steps: 20
     #save_x: True
     #save_p: True
 inference_save_keys:

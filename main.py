@@ -501,10 +501,10 @@ class BaseDenovo:
                 dataframe['name'].extend(batch['experiment_name'])
                 if 'chimeric' in batch:
                     if 'chimeric' not in dataframe: dataframe['chimeric'] = []
-                    dataframe['chimeric'].extend(batch['chimeric'])
+                    dataframe['chimeric'].extend(batch['chimeric'].cpu().numpy().tolist())
                 if 'hyperscore' in batch:
                     if 'hyperscore' not in dataframe: dataframe['hyperscore'] = []
-                    dataframe['hyperscore'].extend(batch['hyperscore'])
+                    dataframe['hyperscore'].extend(batch['hyperscore'].cpu().numpy().tolist())
                 dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
                 dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
                 dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
@@ -1138,6 +1138,7 @@ if __name__ == '__main__':
         no_grad = False if hasattr(D, 'classifier') else True
 
         # Run evaluation
+        evalkwargs = dict(evc['eval_kwargs']) if evc['eval_kwargs'] is not None else {}
         if config['inference']:
             D.inference(
                 output_filename=evc['outpath'],
@@ -1145,7 +1146,7 @@ if __name__ == '__main__':
                 max_batches=max_batches,
                 stream_write=evc['stream'],
                 no_grad=no_grad,
-                kwargs=D.eval_kwargs|dict(evc['eval_kwargs']),
+                kwargs=D.eval_kwargs|evalkwargs,
                 save_keys=evconfig['inference_save_keys'],
             )
         else:
@@ -1155,7 +1156,7 @@ if __name__ == '__main__':
                 save_df=evc['save'], 
                 stream_write=evc['stream'],
                 no_grad=no_grad, 
-                kwargs=D.eval_kwargs,
+                kwargs=D.eval_kwargs|evalkwargs,
             )
         
             # Saving results
