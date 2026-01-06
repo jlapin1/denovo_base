@@ -1,4 +1,4 @@
-eval_only: True
+eval_only: False
 inference: False
 batch_size: 100
 top_peaks: 100
@@ -23,16 +23,16 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/placeholder # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -40,19 +40,19 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  train_name: train
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  val_name: val
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  train_name:
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  val_name: cerevisiae
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/dictionary.tsv
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 2
-  reverse: False
+  reverse: True
   val_steps: 100
   remove_columns:
     - 'scan_number'
@@ -67,7 +67,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: ar # *diff* | *mdlm* | *
 
 # Encoder model
 

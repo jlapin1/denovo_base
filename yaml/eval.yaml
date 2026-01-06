@@ -1,31 +1,29 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
   eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
-  eval_name: cerevisiae
-  loader_custom_columns:
-    #- 'file_index'
-    #- 'scan'
+  eval_name: Arabidopsis_thaliana_Root
   set: val # key name in D.data.dataloader/dataset
-  val_steps: # only for the set: val
-  max_batches:
+  max_batches: 100
+  val_steps:
   save: True
-  stream: True
-  outpath: ./mdlm_kingdomsSC_20steps.parquet
+  stream: False
+  outpath: ./hold.parquet
   # diffusion only
   clamp_denoised: # None -> use existing setting in loaded yaml
   n: 1 # None -> use existing
+  loader_custom_columns:
   eval_kwargs:
-    num_steps: 20
+    #num_steps: 20
     #save_x: True
     #save_p: True
-inference_save_keys:
-  - experiment_name
-  - file_index
-  - scan
-  - length
-  - charge
-  - mass
-  - aa_prob_min
-  - pep_prob_min
+  inference_save_keys:
+    - experiment_name
+    - file_index
+    - scan
+    - length
+    - charge
+    - mass
+    - aa_prob_min
+    - pep_prob_min
 eval_train: 
   set: val
