@@ -1,4 +1,4 @@
-eval_only: False
+eval_only: True
 inference: False
 batch_size: 100
 top_peaks: 100
@@ -23,7 +23,7 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: # Load weights from previous run (project path->timestamp)
+prev_wts: /cmnfs/proj/diffusion/experiments/placeholder #2025-11-04_06-50-17 # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -52,7 +52,7 @@ loader:
     #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 2
-  reverse: True
+  reverse: False
   val_steps: 100
   remove_columns:
     - 'scan_number'
@@ -67,7 +67,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *
 
 # Encoder model
 
