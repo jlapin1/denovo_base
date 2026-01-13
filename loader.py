@@ -299,8 +299,9 @@ class LoaderHF(LoaderObj):
         #dataset = dataset.filter(lambda example: example['chimeric'])
 
         # Filter val set for dispersed examples
-        if 'val_steps' in kwargs.keys():
-            if kwargs['val_steps'] is not None:
+        if ('val_steps' in kwargs.keys()) and ('disperse' in kwargs.keys()):
+            if kwargs['disperse'] and (kwargs['val_steps'] is not None):
+                print(f"<LOADCOMMENT> Dispersing validation set into {kwargs['val_steps']} batches")
                 every_n_ = self.val_size // batch_size // kwargs['val_steps']
                 if every_n_ > 2:
                     every_n_ -= 1 # minus 1 to be safe (charge and length filter make dataset shorter)

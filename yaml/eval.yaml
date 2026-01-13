@@ -1,11 +1,11 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
-  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/chimeric # None: use config.yaml setting, else: override
-  eval_name: MSV000092512
+  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
+  eval_name: cerevisiae
   set: val # key name in D.data.dataloader/dataset
-  max_batches: 100
   val_steps: 100
-  save: True
+  disperse: False
+  save: False
   stream: False
   outpath: ./hold.parquet
   # diffusion only

@@ -966,7 +966,7 @@ class DenovoMDLMObj(BaseDenovo):
         backbone = self.model.decoder
         model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs)
         
-        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none') #* th.linspace(10, 1, target.shape[0], device=device)[:,None]
+        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
         
         # Logging token loss - BEWARE OF MEMORY LEAK
         #discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
@@ -1087,6 +1087,7 @@ if __name__ == '__main__':
         cc = evconfig['eval_only']['loader_custom_columns']
         config['loader']['custom_columns'] = [] if cc == None else cc
         config['loader']['val_steps'] = evconfig['eval_only']['val_steps']
+        config['loader']['disperse'] = evconfig['eval_only']['disperse']
     
     #####################
     # Downstream object #
@@ -1123,7 +1124,8 @@ if __name__ == '__main__':
         evc = evconfig['eval_only']
         
         # Apply settings that are independent of training
-        max_batches = int(eval(str(evc['max_batches'] if evc['max_batches'] is not None else 9e10)))
+        max_batches = int(eval(str(evc['val_steps'] if evc['val_steps'] is not None else 9e10)))
+        if 'max_batches' in evc.keys(): max_batches = evc['max_batches'] # override val steps
         if config['decoder_name'] in ['diff', 'mdlm']:
             if evc['clamp_denoised'] is not None:
                 D.model.decoder.clamp_denoised = evc['clamp_denoised']
