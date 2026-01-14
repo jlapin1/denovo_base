@@ -25,6 +25,7 @@ import metrics as met
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import math
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
@@ -930,6 +931,8 @@ class DenovoMDLMObj(BaseDenovo):
         
         self.model.to(device)
 
+        self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
+
     def initialize_token_loss(self):
         self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
         self.token_count = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
@@ -972,6 +975,11 @@ class DenovoMDLMObj(BaseDenovo):
         #discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
         #self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)
         #self.token_count[discrete_timesteps, :loss_mask.shape[1]] += (masked_token_mask & loss_mask).int()
+        
+        # 3 versions of loss weight I tried. Multiply to the loss before applying the mask
+        """weight = self.weightmat(masked_token_mask.shape[1]).to(device)
+        weight = ((masked_token_mask==False)[:,None] * weight[None] ).sum(-1) # weight is bigger if token surrounded by more unasked tokens
+        weight = loss_mask.float() + 0.1*(loss_mask==False)"""
         
         loss = loss[masked_token_mask]
         token_nll = loss.mean()
