@@ -147,7 +147,9 @@ class SelfAttention(BaseAttentionLayer):
             gate=gate, dropout=dropout, alphabet=alphabet
         )
 
-        self.qkv = nn.Linear(indim, 3*d*h, bias=True)
+        self.wq = nn.Linear(indim, d*h, bias=True)
+        self.wk = nn.Linear(indim, d*h, bias=True)
+        self.wv = nn.Linear(indim, d*h, bias=True)
 
         self.bias = bias
         if bias == 'pairwise':
@@ -161,14 +163,14 @@ class SelfAttention(BaseAttentionLayer):
             self.alphak = nn.Parameter(th.tensor(0.))
             self.alphav = nn.Parameter(th.tensor(0.))
         
-    def get_qkv(self, qkv):
-        bs, sl, units = qkv.shape
-        Q, K, V = qkv.split(units//3, -1)
-        Q = Q.reshape(-1, sl, self.d, self.h)
+    def get_qkv(self, q, k, v):
+        bs, sl, units = q.shape
+        #Q, K, V = qkv.split(units//3, -1)
+        Q = q.reshape(-1, sl, self.d, self.h)
         Q = Q.permute([0,3,1,2]).reshape(-1, sl, self.d)
-        K = K.reshape(-1, sl, self.d, self.h)
+        K = k.reshape(-1, sl, self.d, self.h)
         K = K.permute([0,3,1,2]).reshape(-1, sl, self.d)
-        V = V.reshape(-1, sl, self.d, self.h)
+        V = v.reshape(-1, sl, self.d, self.h)
         V = V.permute([0,3,1,2]).reshape(-1, sl, self.d)
         if self.modulator:
             Q *= th.sigmoid(self.alphaq)
@@ -177,10 +179,12 @@ class SelfAttention(BaseAttentionLayer):
         
         return Q, K, V # bs*h, sl, d
     
-    def forward(self, x, mask=None, biastsr=None, return_full=False):
+    def forward(self, x, mask=None, biastsr=None, k=None, v=None, return_full=False):
         bs, sl, units = x.shape
-        qkv = self.qkv(x) # bs, sl, 3*d*h
-        Q, K, V = self.get_qkv(qkv) # bs*h, sl, d
+        q = self.wq(x) # bs, sl, d*h
+        if k == None: k = self.wk(x) # bs, sl, d*h
+        if v == None: v = self.wv(x) # bs, sl, d*h
+        Q, K, V = self.get_qkv(q, k, v) # bs*h, sl, d
         if self.bias == 'regular':
             B = self.Wb(x)[:,None]
             B = B.permute([0,3,1,2])
@@ -209,9 +213,10 @@ class SelfAttention(BaseAttentionLayer):
         else:
             output = self.shortcut(x) + self.drop(resid)
         
-        other = [Q, K, V] + other + [resid] if return_full else None
+        #other = [Q, K, V] + other + [resid] if return_full else None
+        kv_cache = {'k': k, 'v': v}
         
-        return {'out': output, 'other': other}
+        return {'out': output, 'kv_cache': kv_cache}
 
 class CrossAttention(BaseAttentionLayer):
     def __init__(self, indim, kvindim, d, h, out_units=None, dropout=0, alphabet=False):
@@ -338,7 +343,9 @@ class TransBlock(nn.Module):
         
     def forward(self, 
                 x, 
-                kv_feats=None, 
+                kv_feats=None,
+                sa_cache_k=None,
+                sa_cache_v=None,
                 embed_feats=None, 
                 spec_mask=None, 
                 seq_mask=None,
@@ -369,7 +376,7 @@ class TransBlock(nn.Module):
             Emb = None
         
         # Self attention
-        outsa = self.selfattention(out, selfmask, biastsr, return_full=return_full)
+        outsa = self.selfattention(out, selfmask, biastsr, k=sa_cache_k, v=sa_cache_v, return_full=return_full)
         out = outsa['out']
         if not self.prenorm:
             out = self.norm1(out)
@@ -391,7 +398,7 @@ class TransBlock(nn.Module):
         
         other = outsa['other'] + outffn['other'] + [out] if return_full else None
         
-        return {'out': out, 'other': other}
+        return {'out': out, 'other': other, 'kv_cache': outsa['kv_cache']}
 
 class ActModule(nn.Module):
     def __init__(self, activation):

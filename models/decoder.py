@@ -18,8 +18,12 @@ def init_decoder_weights(module):
             module.first.bias = I.zeros_(module.first.bias)
     if isinstance(module, (mp.SelfAttention, mp.CrossAttention)):
         module.Wo.weight = I.normal_(module.Wo.weight, 0.0, (1/3)*(module.h*module.d)**-0.5)
-        if hasattr(module, 'qkv'):
-            module.qkv.weight = I.normal_(module.qkv.weight, 0.0, (2/3)*module.indim**-0.5)
+        if hasattr(module, 'wq'):
+            module.wq.weight = I.normal_(module.wq.weight, 0.0, (2/3)*module.indim**-0.5)
+        if hasattr(module, 'wk'):
+            module.wk.weight = I.normal_(module.wk.weight, 0.0, (2/3)*module.indim**-0.5)
+        if hasattr(module, 'wv'):
+            module.wv.weight = I.normal_(module.wv.weight, 0.0, (2/3)*module.indim**-0.5)
         if hasattr(module, 'Wb'):
             module.Wb.weight = I.zeros_(module.Wb.weight)
             module.Wb.bias = I.zeros_(module.Wb.bias)

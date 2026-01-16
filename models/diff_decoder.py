@@ -200,18 +200,28 @@ class base_diffusion_decoder(nn.Module):
     def sequence_mask(self, seq):
         return seq != self.NT
 
-    def Main(self, inp, kv_feats, embed=None, spec_mask=None, seq_mask=None):
+    def Main(self, inp, kv_feats, embed=None, spec_mask=None, seq_mask=None, sa_cache=None):
         out = inp
-        for layer in self.main:
+        caches=[]
+        for i, layer in enumerate(self.main):
+            if sa_cache is not None:
+                dic = sa_cache[i]
+                sa_cache_k = dic['k']
+                sa_cache_v = dic['v']
+            else:
+                sa_cache_k=sa_cache_v=None
             out = layer(
                 out, 
                 kv_feats=kv_feats, 
                 embed_feats=embed, 
                 spec_mask=spec_mask,
-                seq_mask=seq_mask 
+                seq_mask=seq_mask,
+                sa_cache_k=sa_cache_k,
+                sa_cache_v=sa_cache_v,
             )
+            caches.append(out['kv_cache'])
             out = out['out']
-        
+        out = {'out': out, 'kv_cache': caches}
         return out
 
 class DenovoDiffusionDecoder(base_diffusion_decoder):
@@ -479,6 +489,11 @@ class MDLMDecoder(base_diffusion_decoder):
             nn.Linear(running_units, self.predcats),
         )
 
+        if 'block_size' in kwargs:
+            self.block_size = kwargs['block_size']
+        else:
+            self.block_size = None
+
     def finish_dict(self):
         self.outdict['<SOS>'] = int(get_max_dic_value(self.outdict)) # TODO backwards compat. for checkpoints prior to Dec2025 REMOVE once you have new weights.
         self.outdict['<MASK>'] = int(get_max_dic_value(self.outdict))
@@ -493,7 +508,9 @@ class MDLMDecoder(base_diffusion_decoder):
         kv_features,
         charge,
         mass,
+        sa_cache=None,
         specmask=None,
+        seqmask=None,
         self_conditions=None,
     ):
         # Timestep
@@ -512,14 +529,17 @@ class MDLMDecoder(base_diffusion_decoder):
             kv_feats=kv_features,
             embed=time_emb,
             spec_mask=specmask,
-            seq_mask=None,
+            seq_mask=seqmask,
+            sa_cache=sa_cache,
         )
+        cache = out['kv_cache']
+        out = out['out']
 
         # End
         out = self.proj_end(out)
         out = self.RemovePrecursorToken(out)
 
-        return out
+        return {'out': out, 'sa_cache': cache}
     
     def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
         model_kwargs = {

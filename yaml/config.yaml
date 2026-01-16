@@ -27,12 +27,12 @@ prev_wts: #/cmnfs/proj/diffusion/experiments/2025-11-04_06-50-17 # Load weights 
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -171,6 +171,7 @@ decoder_diff:
     alphabet: False
     self_condition: True
     clamp_denoised: False
+    block_size: 5
   # ensemble prediction
   ensemble:
     ensemble_n: 1

@@ -281,7 +281,7 @@ class Diffusion:
     sigma = self._process_sigma(sigma)
     model_kwargs['timesteps'] = sigma
     with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float32):
-      logits = self.backbone(x, **model_kwargs)
+      logits = self.backbone(x, **model_kwargs)['out']
     
     if self.parameterization == 'subs':
       out = self._subs_parameterization(logits=logits.clone(),
@@ -950,7 +950,7 @@ class Diffusion:
                           dim=-1,
                           index=x0[:, :, None]).squeeze(-1)
 
-  def _forward_pass_diffusion(self, backbone, x0, model_kwargs):
+  def _forward_pass_diffusion(self, backbone, x0, model_kwargs, block_training=False):
     t = self._sample_t(x0.shape[0], x0.device)#[torch.randperm(x0.shape[0])]
     if self.T > 0:
       t = (t * self.T).to(torch.int)
@@ -973,15 +973,17 @@ class Diffusion:
     #multiplier = torch.where(within, 1.0, ~within * t[:,None].clamp(0.5, 0.9)) # t*t < t
     #move_chance = move_chance * multiplier
     xt = self.q_xt(x0, move_chance)
+    if block_training:
+        xt = torch.cat([xt, x0], dim=1)
 
     if self.config['model']['self_condition']:
-        model_kwargs['self_conditions'] = torch.zeros(x0.shape[0], x0.shape[1], self.vocab_size, device=device)
+        model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
         if np.random.uniform() > 0.5:
             with torch.no_grad():
-                model_output = backbone(xt, **model_kwargs)
+                model_output = backbone(xt, **model_kwargs)['out']
             model_kwargs['self_conditions'] = model_output.detach()
     
-    model_output = backbone(xt, **model_kwargs)
+    model_output = backbone(xt, **model_kwargs)['out']
     utils.print_nans(model_output, 'model_output')
     return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index, t
     
