@@ -1227,7 +1227,7 @@ if __name__ == '__main__':
             print("\n", out)
     else:
         print("Test validation", end='')
-        #out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-        #assert D.config['high_score'] in out.keys()
+        out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+        assert D.config['high_score'] in out.keys()
         print("\rTest validation passed")
         print(D.TrainEval()[-1])

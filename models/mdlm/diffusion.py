@@ -627,181 +627,193 @@ class Diffusion:
       x[:, i + 1] = y
     return x
 
-  #@torch.no_grad()
-  #def _sample(
-  #    self, 
-  #    num_steps=None, 
-  #    eps=1e-5,
-  #    top=None,
-  #    model_kwargs={}, 
-  #    save_x=False, 
-  #    save_p=False, 
-  #    progress=False
-  #):
-  #    """Generate samples from the model."""
-  #    batch_size_per_gpu = len(model_kwargs['charge'])
-  #    
-  #    if self.parameterization == 'ar':
-  #        return self._ar_sampler(batch_size_per_gpu)
-  #    
-  #    if num_steps is None:
-  #        num_steps = self.steps
-  #    
-  #    # Initialize variables
-  #    x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
-  #    if self.config['sampling']['sampler'] == 'cosine':
-  #        # Delays unmasking
-  #        timesteps = CosineSampler(num_steps)
-  #    elif self.config['sampling']['sampler'] == 'sigmoid':
-  #        # Increases unmasking in the middle of trajectory
-  #        timesteps = SigmoidSampler(num_steps, self.config['sampling']['sigmoid_zero_value'])
-  #    elif self.config['sampling']['sampler'] == 'cube':
-  #        # Increases unmasking at beginning and end
-  #        timesteps = CubeSampler(num_steps)
-  #    else:
-  #        # Unmasking rate is constant throughout trajectory
-  #        timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
-  #    
-  #    p_x0_cache = None
-  #    if self.config['model']['self_condition']:
-  #        model_kwargs['self_conditions'] = torch.zeros(
-  #            batch_size_per_gpu, self.SL, self.vocab_size, device=self.device
-  #        )
-  #    if save_x:
-  #        xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
-  #        xsave[0] = x
-  #    if save_p: 
-  #        psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
-  #    
-  #    # Sampling loops
-  #    pbar = tqdm(range(num_steps)) if progress else range(num_steps)
-  #    for i in pbar:
-  #        t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
-  #        dt = timesteps[i] - timesteps[i+1]
-  #        #model_kwargs['timesteps'] = t # Set in self.forward()
-  #        top = self.config['sampling']['top'] if top is None else top
-
-  #        if self.sampler == 'ddpm':
-  #            x = self._ddpm_update(x, t, dt, model_kwargs, top=top)
-  #        elif self.sampler == 'ddpm_cache':
-  #            p_x0_cache, x_next, logits = self._ddpm_caching_update(
-  #                x, t, dt, p_x0=p_x0_cache, top=top, model_kwargs=model_kwargs
-  #            )
-  #            if self.config['model']['self_condition']:
-  #                model_kwargs['self_conditions'] = logits
-  #         
-  #        if save_p: 
-  #            psave[i] = p_x0_cache
-  #        if (not torch.allclose(x_next, x) or self.time_conditioning):
-  #            # Disable caching
-  #            p_x0_cache = None
-  #            x = x_next
-  #        else:
-  #            x = self._analytic_update(x, t, dt)
-  #        if save_x: 
-  #            xsave[i+1] = x
-  #    
-  #    # Final decisions
-  #    if self.config['sampling']['noise_removal']:
-  #        t = timesteps[-1] * torch.ones(x.shape[0], 1, device=self.device)
-  #        if self.sampler == 'analytic':
-  #            x = self._denoiser_update(x, t, model_kwargs)
-  #        else:
-  #            sigma_t = self.noise(t)[0]
-  #            x, logits = self.forward(x, sigma_t, model_kwargs)
-  #            x = x.argmax(dim=-1)
-  #    
-  #    # Output
-  #    output = {'prediction': x, 'logits': logits}
-  #    if save_x:
-  #        output['x_save'] = xsave.transpose(0,1)
-  #    if save_p:
-  #        output['p_save'] = psave.transpose(0,1)
-  #    
-  #    return output
-
+  @torch.no_grad()
   def _sample(
-    self, 
-    eps=1e-5, 
-    num_steps=0, 
-    model_kwargs={}, 
-    save_x=False, 
-    save_p=False, 
-    progress=False,
-    **kwargs
+      self,
+      x=None,
+      num_steps=None, 
+      eps=1e-5,
+      top=None,
+      model_kwargs={}, 
+      save_x=False, 
+      save_p=False, 
+      progress=False
   ):
-    batch_size_per_gpu = len(model_kwargs['charge'])
-
-    # Initialize variables
-    x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
-    #steps_btw = num_steps
-    num_steps = self.SL #(1+num_steps)*self.SL
-    timesteps = torch.linspace(1, eps, num_steps, device=self.device)
-
-    p_x0_cache = None
-    if self.config['model']['self_condition']:
-      model_kwargs['self_conditions'] = torch.zeros(
-        batch_size_per_gpu, self.SL, self.vocab_size, device=self.device
-      )
-    if save_x:
-      xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
-      xsave[0] = x
-    if save_p: 
-      psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
+      """Generate samples from the model."""
+      batch_size_per_gpu = len(model_kwargs['charge'])
       
-    pbar = tqdm(range(num_steps)) if progress else range(num_steps)
-    for i in pbar:
-      # Timestep
-      t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
-      if t.ndim > 1:
-        t = t.squeeze(-1)
-      sigma_t, _ = self.noise(t)
-        
-      # Model forward pass
-      if p_x0_cache is None:
-        logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
-        p_x0 = logp_x0.exp()
-        p_x0_ = p_x0[...,:-1]
-        
-        # Set self-conditions
-        if self.config['model']['self_condition']:
-          model_kwargs['self_conditions'] = logits
-        
-        if True:#i % (steps_btw+1) == 0:
-            # Automatic switchovers
-            auto_unmask = p_x0 > self.config['sampling']['max_prob']
-            where = torch.where(auto_unmask)
-            x[where[0], where[1]] = where[2]
-            
-            maxlog, maxcat = p_x0.max(-1)
-            maxlog[x!=self.mask_index] = 0
-            maxlog2, maxind = maxlog.max(-1)
-            bd = torch.arange(len(maxind), device=self.device)
-            x[bd, maxind] = maxcat[bd, maxind]
-        if (x!=self.mask_index).all():
-            break
-        
-        if save_p: 
-            psave[i] = p_x0
-        #if (not torch.allclose(x_next, x) or self.time_conditioning):
-        #    # Disable caching
-        #    p_x0_cache = None
-        #    x = x_next
-        #else:
-        #    x = self._analytic_update(x, t, dt)
-        if save_x: 
-            xsave[i+1] = x
+      if self.parameterization == 'ar':
+          return self._ar_sampler(batch_size_per_gpu)
       
-    assert (x!=self.mask_index).all()
+      if num_steps is None:
+          num_steps = self.steps
+      
+      # Initialize variables
+      if x == None:
+          x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
+      if self.config['sampling']['sampler'] == 'cosine':
+          # Delays unmasking
+          timesteps = CosineSampler(num_steps)
+      elif self.config['sampling']['sampler'] == 'sigmoid':
+          # Increases unmasking in the middle of trajectory
+          timesteps = SigmoidSampler(num_steps, self.config['sampling']['sigmoid_zero_value'])
+      elif self.config['sampling']['sampler'] == 'cube':
+          # Increases unmasking at beginning and end
+          timesteps = CubeSampler(num_steps)
+      else:
+          # Unmasking rate is constant throughout trajectory
+          timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
+      
+      p_x0_cache = None
+      if self.config['model']['self_condition']:
+          model_kwargs['self_conditions'] = torch.zeros(
+              batch_size_per_gpu, x.shape[1], self.vocab_size, device=self.device
+          )
+      if save_x:
+          xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
+          xsave[0] = x
+      if save_p: 
+          psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
+      
+      # Sampling loops
+      pbar = tqdm(range(num_steps)) if progress else range(num_steps)
+      for i in pbar:
+          t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
+          dt = timesteps[i] - timesteps[i+1]
+          #model_kwargs['timesteps'] = t # Set in self.forward()
+          top = self.config['sampling']['top'] if top is None else top
 
-    # Output
-    output = {'prediction': x, 'logits': logits}
-    if save_x:
-      output['x_save'] = xsave.transpose(0,1)
-    if save_p:
-      output['p_save'] = psave.transpose(0,1)
+          if self.sampler == 'ddpm':
+              x = self._ddpm_update(x, t, dt, model_kwargs, top=top)
+          elif self.sampler == 'ddpm_cache':
+              p_x0_cache, x_next, logits = self._ddpm_caching_update(
+                  x, t, dt, p_x0=p_x0_cache, top=top, model_kwargs=model_kwargs
+              )
+              if self.config['model']['self_condition']:
+                  model_kwargs['self_conditions'] = logits
+           
+          if save_p: 
+              psave[i] = p_x0_cache
+          if (not torch.allclose(x_next, x) or self.time_conditioning):
+              # Disable caching
+              p_x0_cache = None
+              x = x_next
+          else:
+              x = self._analytic_update(x, t, dt)
+          if save_x: 
+              xsave[i+1] = x
       
-    return output
+      # Final decisions
+      if self.config['sampling']['noise_removal']:
+          t = timesteps[-1] * torch.ones(x.shape[0], 1, device=self.device)
+          if self.sampler == 'analytic':
+              x = self._denoiser_update(x, t, model_kwargs)
+          else:
+              sigma_t = self.noise(t)[0]
+              x, logits = self.forward(x, sigma_t, model_kwargs)
+              x = x.argmax(dim=-1)
+      
+      # Output
+      output = {'prediction': x, 'logits': logits}
+      if save_x:
+          output['x_save'] = xsave.transpose(0,1)
+      if save_p:
+          output['p_save'] = psave.transpose(0,1)
+      
+      return output
+
+  #def _sample(
+  #  self,
+  #  x=None,
+  #  eps=1e-5,
+  #  num_steps=0,
+  #  model_kwargs={},
+  #  save_x=False,
+  #  save_p=False,
+  #  progress=False,
+  #  **kwargs
+  #):
+  #  batch_size_per_gpu = len(model_kwargs['charge'])
+  #  
+  #  # Initialize variables
+  #  if self.backbone.block_size is not None:
+  #      x_ = self._sample_prior(batch_size_per_gpu, self.backbone.block_size).to(self.device)
+  #      if x is not None:
+  #          # Extending the sequence
+  #          x = torch.cat([x, x_], dim=1)
+  #      else:
+  #          # Starting off
+  #          x = x_
+  #  else:
+  #      x = self._sample_prior(batch_size_per_gpu, self.SL).to(self.device)
+  #  #steps_btw = num_steps
+  #  num_steps = self.SL #(1+num_steps)*self.SL
+  #  timesteps = torch.linspace(1, eps, num_steps, device=self.device)
+
+  #  p_x0_cache = None
+  #  if self.config['model']['self_condition']:
+  #    model_kwargs['self_conditions'] = torch.zeros(
+  #      batch_size_per_gpu, self.SL, self.vocab_size, device=self.device
+  #    )
+  #  if save_x:
+  #    xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
+  #    xsave[0] = x
+  #  if save_p: 
+  #    psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
+  #    
+  #  pbar = tqdm(range(num_steps)) if progress else range(num_steps)
+  #  for i in pbar:
+  #    # Timestep
+  #    t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
+  #    if t.ndim > 1:
+  #      t = t.squeeze(-1)
+  #    sigma_t, _ = self.noise(t)
+  #      
+  #    # Model forward pass
+  #    if p_x0_cache is None:
+  #      logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
+  #      p_x0 = logp_x0.exp()
+  #      p_x0_ = p_x0[...,:-1]
+  #      
+  #      # Set self-conditions
+  #      if self.config['model']['self_condition']:
+  #        model_kwargs['self_conditions'] = logits
+  #      
+  #      if True:#i % (steps_btw+1) == 0:
+  #          # Automatic switchovers
+  #          auto_unmask = p_x0 > self.config['sampling']['max_prob']
+  #          where = torch.where(auto_unmask)
+  #          x[where[0], where[1]] = where[2]
+  #          
+  #          maxlog, maxcat = p_x0.max(-1)
+  #          maxlog[x!=self.mask_index] = 0
+  #          maxlog2, maxind = maxlog.max(-1)
+  #          bd = torch.arange(len(maxind), device=self.device)
+  #          x[bd, maxind] = maxcat[bd, maxind]
+  #      if (x!=self.mask_index).all():
+  #          break
+  #      
+  #      if save_p: 
+  #          psave[i] = p_x0
+  #      #if (not torch.allclose(x_next, x) or self.time_conditioning):
+  #      #    # Disable caching
+  #      #    p_x0_cache = None
+  #      #    x = x_next
+  #      #else:
+  #      #    x = self._analytic_update(x, t, dt)
+  #      if save_x: 
+  #          xsave[i+1] = x
+  #    
+  #  assert (x!=self.mask_index).all()
+
+  #  # Output
+  #  output = {'prediction': x, 'logits': logits}
+  #  if save_x:
+  #    output['x_save'] = xsave.transpose(0,1)
+  #  if save_p:
+  #    output['p_save'] = psave.transpose(0,1)
+  #    
+  #  return output
 
   def restore_model_and_sample(self, num_steps, eps=1e-5):
     """Generate samples from the model."""
@@ -973,8 +985,10 @@ class Diffusion:
     #multiplier = torch.where(within, 1.0, ~within * t[:,None].clamp(0.5, 0.9)) # t*t < t
     #move_chance = move_chance * multiplier
     xt = self.q_xt(x0, move_chance)
+    masked_token_mask = xt==self.mask_index
     if block_training:
         xt = torch.cat([xt, x0], dim=1)
+        masked_token_mask = torch.cat([masked_token_mask, x0 != self.NT], dim=1)
 
     if self.config['model']['self_condition']:
         model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
@@ -985,7 +999,7 @@ class Diffusion:
     
     model_output = backbone(xt, **model_kwargs)['out']
     utils.print_nans(model_output, 'model_output')
-    return model_output, dsigma / torch.expm1(sigma), xt==self.mask_index, t
+    return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
     
     if self.parameterization == 'sedd':
       return dsigma[:, None] * self._score_entropy(

@@ -501,6 +501,14 @@ class MDLMDecoder(base_diffusion_decoder):
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = get_max_dic_value(self.outdict)
         self.scale = Scale(self.outdict)
+    
+    def create_block(self, batch_size, block_size=None):
+        block_size = self.block_size if block_size==None else block_size
+        return th.full((batch_size, block_size), self.MASK, dtype=th.int64)
+
+    def add_block(self, x, block_size=None):
+        add = self.create_block(x.shape[0], block_size=block_size).to(x.device)
+        return th.cat([x, add], dim=1)
 
     def forward(self,
         x,
@@ -542,17 +550,62 @@ class MDLMDecoder(base_diffusion_decoder):
         return {'out': out, 'sa_cache': cache}
     
     def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
+        bs = embedding.shape[0]
         model_kwargs = {
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
         }
-        out = self.diff_obj._sample(
-            save_x=save_x, 
-            save_p=save_p, 
-            top=top,
-            num_steps=num_steps,
-            progress=progress, 
-            model_kwargs=model_kwargs
-        )
-        return out
+        blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
+        
+        out = th.full((bs, self.max_sl), self.MASK, dtype=th.int64, device=embedding.device)
+        logits = th.empty((bs, self.max_sl, self.predcats), dtype=th.float32, device=embedding.device)
+        x = th.empty((bs, 0), dtype=th.int64).to(embedding.device)
+        for m in range(blocks):
+            
+            # Add to input
+            if blocks == 1:
+                x = None
+            else:
+                block_size = self.block_size if m<blocks-1 else out.shape[1]-m*self.block_size
+                x = self.add_block(x, block_size=block_size)
+            
+            # Predict
+            out_ = self.diff_obj._sample(
+                x=x,
+                save_x=save_x,
+                save_p=save_p,
+                top=top,
+                num_steps=num_steps,
+                progress=progress,
+                model_kwargs=model_kwargs
+            )
+            
+            # Add to output
+            if blocks == 1:
+                out = out_['prediction']
+                logits = out_['logits']
+                x_save = out_['x_save']
+                p_save = out_['p_save']
+            else:
+                extent = min(self.max_sl, (m+1)*self.block_size)
+                out[:, : extent] = out_['prediction']
+                logits[:, m*self.block_size : extent] = out_['logits'][:, m*self.block_size : extent]
+                x = out_['prediction']
+                if save_x:
+                    if m==0:
+                        x_save = out_['x_save']
+                    else:
+                        x_save = th.cat([x_save, out_['x_save'][:,:,m*self.block_size:extent]], dim=2)
+                if save_p:
+                    if m==0:
+                        p_save = out_['p_save']
+                    else:
+                        p_save = th.cat([p_save, out_['p_save'][:,:,m*self.block_size:extent]], dim=2)
+                
+        return {
+            'prediction' : out, 
+            'logits': logits,
+            'x_save': x_save if save_x else None,
+            'p_save': p_save if save_p else None,
+        }

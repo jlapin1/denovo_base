@@ -27,12 +27,12 @@ prev_wts: #/cmnfs/proj/diffusion/experiments/2025-11-04_06-50-17 # Load weights 
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -47,12 +47,12 @@ loader:
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
   dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
   synonyms:
-    #- [I, L]
+    - [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 2
-  reverse: False
+  reverse: True
   val_steps: 100
   disperse: False
   remove_columns:
@@ -151,7 +151,7 @@ decoder_diff:
     use_loss_mask: False
   model_config:
     running_units: 512
-    sequence_length: 30
+    sequence_length: 41
     depth: 9
     d: 64
     h: 8
@@ -184,7 +184,7 @@ decoder_mdlm:
     time_conditioning: True
     sampling:
       predictor: ddpm_cache
-      steps: 128
+      steps: 64
       sampler: linear # linear | cosine | sigmoid | cube
       sigmoid_zero_value: 0.00247
       top: 1
