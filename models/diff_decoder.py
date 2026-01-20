@@ -603,9 +603,9 @@ class MDLMDecoder(base_diffusion_decoder):
                     else:
                         p_save = th.cat([p_save, out_['p_save'][:,:,m*self.block_size:extent]], dim=2)
                 
-        return {
-            'prediction' : out, 
-            'logits': logits,
-            'x_save': x_save if save_x else None,
-            'p_save': p_save if save_p else None,
-        }
+        output = {'prediction' : out, 'logits': logits,}
+        if save_x:
+            output['x_save'] = x_save
+        if save_p:
+            output['p_save'] = p_save
+        return output

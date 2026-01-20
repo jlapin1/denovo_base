@@ -988,7 +988,7 @@ class Diffusion:
     masked_token_mask = xt==self.mask_index
     if block_training:
         xt = torch.cat([xt, x0], dim=1)
-        masked_token_mask = torch.cat([masked_token_mask, x0 != self.NT], dim=1)
+        #masked_token_mask = torch.cat([masked_token_mask, x0 != self.NT], dim=1)
 
     if self.config['model']['self_condition']:
         model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)

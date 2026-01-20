@@ -974,7 +974,7 @@ class DenovoMDLMObj(BaseDenovo):
 
     def inptarg(self, batch):
         bs, sl = batch['intseq'].shape
-
+        
         #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
         
         target = deepcopy(batch['intseq'])
@@ -982,16 +982,17 @@ class DenovoMDLMObj(BaseDenovo):
         target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
         
         loss_mask = self.model.decoder.sequence_mask(target)
-
+        
         return None, target, loss_mask
 
     def train_step(self, batch):
         batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
-        training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size)
+        OSL = target.shape[1]
+        training_mask = self.FullBlockMask(OSL, self.model.decoder.block_size)
         if self.model.decoder.block_size is not None:
             training_mask = training_mask[None,None]
-            target_ = th.cat([target, target], dim=1)
+            target_ = target #th.cat([target, target], dim=1)
         else:
             target_ = target
 
@@ -1012,12 +1013,12 @@ class DenovoMDLMObj(BaseDenovo):
         #    with th.no_grad():
         #        out = self.model.decoder(target, timesteps=th.zeros_like(batch['mass']), self_conditions=self_conditions, **model_kwargs)
         #    model_kwargs['sa_cache'] = out['sa_cache']
-
+        
         backbone = self.model.decoder
         block_training = True if self.model.decoder.block_size is not None else False
         model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_training)
         
-        loss = F.cross_entropy(model_output.transpose(-1,-2), target_, reduction='none')
+        loss = F.cross_entropy(model_output[:,:OSL].transpose(-1,-2), target_, reduction='none')
         
         # Logging token loss - BEWARE OF MEMORY LEAK
         #discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
@@ -1040,7 +1041,7 @@ class DenovoMDLMObj(BaseDenovo):
         token_nll.backward()
         self.update_lr()
         self.opt.step()
-
+        
         return losses
     
     def log_wandb(self, losses, grad_norm):
