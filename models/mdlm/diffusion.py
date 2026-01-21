@@ -963,7 +963,9 @@ class Diffusion:
                           index=x0[:, :, None]).squeeze(-1)
 
   def _forward_pass_diffusion(self, backbone, x0, model_kwargs, block_training=False):
-    t = self._sample_t(x0.shape[0], x0.device)#[torch.randperm(x0.shape[0])]
+    bs, sl = x0.shape
+
+    t = self._sample_t(bs, x0.device)#[torch.randperm(x0.shape[0])]
     if self.T > 0:
       t = (t * self.T).to(torch.int)
       t = t / self.T
@@ -981,14 +983,10 @@ class Diffusion:
       model_kwargs['timesteps'] = sigma if self.time_conditioning else torch.zeros_like(sigma)
       move_chance = 1 - torch.exp(-sigma[:, None])
     
-    #within = (torch.where(x0 == self.eos_token_id)[1]+1)[:,None] > torch.arange(x0.shape[1], device=device)[None].tile([x0.shape[0],1])
-    #multiplier = torch.where(within, 1.0, ~within * t[:,None].clamp(0.5, 0.9)) # t*t < t
-    #move_chance = move_chance * multiplier
     xt = self.q_xt(x0, move_chance)
     masked_token_mask = xt==self.mask_index
     if block_training:
         xt = torch.cat([xt, x0], dim=1)
-        #masked_token_mask = torch.cat([masked_token_mask, x0 != self.NT], dim=1)
 
     if self.config['model']['self_condition']:
         model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
@@ -998,6 +996,10 @@ class Diffusion:
             model_kwargs['self_conditions'] = model_output.detach()
     
     model_output = backbone(xt, **model_kwargs)['out']
+
+    if block_training:
+        model_output = model_output[:, :sl]
+        masked_token_mask = masked_token_mask[:, :sl]
     utils.print_nans(model_output, 'model_output')
     return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
     

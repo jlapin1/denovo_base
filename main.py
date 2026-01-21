@@ -932,30 +932,11 @@ class DenovoMDLMObj(BaseDenovo):
         self.model.to(device)
 
         self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
+        self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token).to(device)
 
     def initialize_token_loss(self):
         self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
         self.token_count = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
-
-    def BlockMasks(self, typ, sequence_length, block_size, precursor_token=False):
-        if block_size==None:
-            return None
-        blocks = sequence_length // block_size
-        blocks += 1 if sequence_length % block_size > 0 else 0
-
-        if typ=='block_causal':
-            mask = 1e7*(th.tril(th.ones(blocks, blocks))[:,None,:,None].tile(1,block_size,1,block_size).reshape(blocks*block_size, blocks*block_size) == 0).float()
-        elif typ=='block_diagonal':
-            tensor = th.ones(block_size, block_size)
-            mask = th.block_diag(*(blocks*[tensor]))
-            mask = 1e7*(mask==0).float()
-        elif typ=='offset_block_causal':
-            mask = 1e7*(th.tril(th.ones(blocks, blocks), diagonal=-1)[:,None,:,None].tile(1,block_size,1,block_size).reshape(blocks*block_size, blocks*block_size) == 0).float()
-        mask = mask[:sequence_length, :sequence_length]
-        if precursor_token:
-            mask = th.cat([th.zeros(sequence_length, 1), mask], dim=1)
-            mask = th.cat([th.zeros(1, sequence_length+1), mask], dim=0)
-        return mask.to(device)
 
     def FullBlockMask(self, sequence_length, block_size, precursor_token=True):
         quadrant_1 = self.BlockMasks('offset_block_causal', sequence_length, block_size)
@@ -986,16 +967,13 @@ class DenovoMDLMObj(BaseDenovo):
         return None, target, loss_mask
 
     def train_step(self, batch):
+        block_decoding = True if self.model.decoder.block_size is not None else False
         batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
-        OSL = target.shape[1]
-        training_mask = self.FullBlockMask(OSL, self.model.decoder.block_size)
-        if self.model.decoder.block_size is not None:
+        training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size)
+        if block_decoding:
             training_mask = training_mask[None,None]
-            target_ = target #th.cat([target, target], dim=1)
-        else:
-            target_ = target
-
+        
         self.model.to(device)
         self.model.train()
         self.model.zero_grad()
@@ -1007,35 +985,16 @@ class DenovoMDLMObj(BaseDenovo):
             'mass': batch['mass'] if 'mass' in batch else None,
             'kv_features': embedding['emb'],
             'seqmask': training_mask,
+            'doubled': True if block_decoding else False,
         }
-        #if self.model.decoder.block_size is not None:
-        #    self_conditions = th.nn.functional.one_hot(target, num_classes=self.model.decoder.predcats).type(th.float32).to(device)
-        #    with th.no_grad():
-        #        out = self.model.decoder(target, timesteps=th.zeros_like(batch['mass']), self_conditions=self_conditions, **model_kwargs)
-        #    model_kwargs['sa_cache'] = out['sa_cache']
         
         backbone = self.model.decoder
-        block_training = True if self.model.decoder.block_size is not None else False
-        model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_training)
+        model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
         
-        loss = F.cross_entropy(model_output[:,:OSL].transpose(-1,-2), target_, reduction='none')
-        
-        # Logging token loss - BEWARE OF MEMORY LEAK
-        #discrete_timesteps = th.minimum((timesteps*self.steps).round(), th.full_like(timesteps, fill_value=self.steps-1)).type(th.int32)
-        #self.token_loss[discrete_timesteps, :loss_mask.shape[1]] += loss*(masked_token_mask & loss_mask)
-        #self.token_count[discrete_timesteps, :loss_mask.shape[1]] += (masked_token_mask & loss_mask).int()
-        
-        # 3 versions of loss weight I tried. Multiply to the loss before applying the mask
-        """weight = self.weightmat(masked_token_mask.shape[1]).to(device)
-        weight = ((masked_token_mask==False)[:,None] * weight[None] ).sum(-1) # weight is bigger if token surrounded by more unasked tokens
-        weight = loss_mask.float() + 0.1*(loss_mask==False)"""
+        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
         
         loss = loss[masked_token_mask]
         token_nll = loss.mean()
-        #nll = loss * loss_mask
-        #count = loss_mask.sum()
-        #batch_nll = nll.sum()
-        #token_nll = batch_nll / count
         losses = {'loss': token_nll}
         
         token_nll.backward()

@@ -30,7 +30,7 @@ new_exp: False # continue using old directory (if pev_wts) or create new one
 save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
-eval_frequency: 5400
+eval_frequency: 600
 # Logging
 log_wandb: True
 wandb_entity: joellapin
@@ -51,9 +51,9 @@ loader:
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  num_workers: 2
+  num_workers: 4
   reverse: True
-  val_steps: 100
+  val_steps: 10
   disperse: False
   remove_columns:
     - 'scan_number'

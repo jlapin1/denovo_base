@@ -1,6 +1,6 @@
 from copy import deepcopy
 import numpy as np
-from utils import Scale
+from utils import Scale, BlockMasks
 import models.model_parts as mp
 import torch as th
 from torch import nn
@@ -166,13 +166,19 @@ class base_diffusion_decoder(nn.Module):
 
         return intseq
     
-    def AddPosEmbed(self, seq_emb):
-        return seq_emb + self.pos_modulator * self.pos[: seq_emb.shape[1]].unsqueeze(0)
+    def AddPosEmbed(self, seq_emb, doubled=False):
+        sl = seq_emb.shape[1]
+        if doubled:
+            halfway = sl // 2
+            pos = th.cat([self.pos[:halfway], self.pos[:halfway]], dim=0)
+        else:
+            pos = self.pos[:sl]
+        return seq_emb + self.pos_modulator * pos.unsqueeze(0)
 
-    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None, seq=None):
+    def AddPrecursorToken(self, seq_emb, charge=None, energy=None, mass=None, seq=None, doubled=False):
         
         # Add position to sequence
-        out = self.AddPosEmbed(seq_emb)
+        out = self.AddPosEmbed(seq_emb, doubled=doubled)
 
         # charge and/or energy embedding
         if self.atleast1:
@@ -510,6 +516,9 @@ class MDLMDecoder(base_diffusion_decoder):
         add = self.create_block(x.shape[0], block_size=block_size).to(x.device)
         return th.cat([x, add], dim=1)
 
+    def get_inference_mask(self, sequence_length):
+        return BlockMasks('block_causal', sequence_length, self.block_size, precursor_token=True)
+
     def forward(self,
         x,
         timesteps,
@@ -520,6 +529,7 @@ class MDLMDecoder(base_diffusion_decoder):
         specmask=None,
         seqmask=None,
         self_conditions=None,
+        doubled=False,
     ):
         # Timestep
         time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
@@ -528,7 +538,7 @@ class MDLMDecoder(base_diffusion_decoder):
         seq_emb = self.embed_sequence(x)
         if self.self_condition:
             seq_emb += self.embed_self_conditions(self_conditions)
-        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass, seq=x) # position added inside
+        emb = self.AddPrecursorToken(seq_emb, charge=charge, mass=mass, seq=x, doubled=doubled) # position added inside
         emb = self.proj_begin(emb)
         
         # Middle
@@ -569,6 +579,7 @@ class MDLMDecoder(base_diffusion_decoder):
             else:
                 block_size = self.block_size if m<blocks-1 else out.shape[1]-m*self.block_size
                 x = self.add_block(x, block_size=block_size)
+                model_kwargs['seqmask'] = self.get_inference_mask(x.shape[1])[None,None].to(x.device)
             
             # Predict
             out_ = self.diff_obj._sample(

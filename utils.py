@@ -326,3 +326,23 @@ def Dict2dev(Dict, device, inplace=False):
 
 def global_grad_norm(model):
     return sum([m.grad.detach().square().sum().item() for m in model.parameters() if (m.requires_grad and m.grad is not None)])**0.5
+
+def BlockMasks(typ, sequence_length, block_size, precursor_token=False):
+    if block_size==None:
+        return None
+    blocks = sequence_length // block_size
+    blocks += 1 if sequence_length % block_size > 0 else 0
+
+    if typ=='block_causal':
+        mask = 1e7*(th.tril(th.ones(blocks, blocks))[:,None,:,None].tile(1,block_size,1,block_size).reshape(blocks*block_size, blocks*block_size) == 0).float()
+    elif typ=='block_diagonal':
+        tensor = th.ones(block_size, block_size)
+        mask = th.block_diag(*(blocks*[tensor]))
+        mask = 1e7*(mask==0).float()
+    elif typ=='offset_block_causal':
+        mask = 1e7*(th.tril(th.ones(blocks, blocks), diagonal=-1)[:,None,:,None].tile(1,block_size,1,block_size).reshape(blocks*block_size, blocks*block_size) == 0).float()
+    mask = mask[:sequence_length, :sequence_length]
+    if precursor_token:
+        mask = th.cat([th.zeros(sequence_length, 1), mask], dim=1)
+        mask = th.cat([th.zeros(1, sequence_length+1), mask], dim=0)
+    return mask
