@@ -596,11 +596,11 @@ class MDLMDecoder(base_diffusion_decoder):
             if blocks == 1:
                 out = out_['prediction']
                 logits = out_['logits']
-                x_save = out_['x_save']
-                p_save = out_['p_save']
+                if save_x: x_save = out_['x_save']
+                if save_p: p_save = out_['p_save']
             else:
                 extent = min(self.max_sl, (m+1)*self.block_size)
-                out[:, : extent] = out_['prediction']
+                out[:, : extent] = out_['prediction'][:,:extent]
                 logits[:, m*self.block_size : extent] = out_['logits'][:, m*self.block_size : extent]
                 x = out_['prediction']
                 if save_x:

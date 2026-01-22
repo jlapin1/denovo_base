@@ -949,8 +949,10 @@ class DenovoMDLMObj(BaseDenovo):
         lower = th.cat([quadrant_3, quadrant_4], dim=1)
         mask = th.cat([upper, lower], dim=0)
         if precursor_token:
+            # Precursor can only see itself, nothing downstream
             mask = th.cat([th.zeros(mask.shape[0], 1, device=device), mask], dim=1)
-            mask = th.cat([th.zeros(1, mask.shape[1], device=device), mask], dim=0)
+            horizontal = th.cat([th.zeros(1), th.full((mask.shape[0],), 1e7)])[None].to(device)
+            mask = th.cat([horizontal, mask], dim=0)
         return mask.to(device)
 
     def inptarg(self, batch):
@@ -970,9 +972,7 @@ class DenovoMDLMObj(BaseDenovo):
         block_decoding = True if self.model.decoder.block_size is not None else False
         batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
-        training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size)
-        if block_decoding:
-            training_mask = training_mask[None,None]
+        training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size, True)[None,None] if block_decoding else None
         
         self.model.to(device)
         self.model.train()
@@ -993,7 +993,8 @@ class DenovoMDLMObj(BaseDenovo):
         
         loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
         
-        loss = loss[masked_token_mask]
+        weights = (target!=self.model.decoder.NT).float() + 0.1*(target==self.model.decoder.NT).float()
+        loss = (weights*loss)[masked_token_mask]
         token_nll = loss.mean()
         losses = {'loss': token_nll}
         

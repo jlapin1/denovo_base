@@ -343,6 +343,8 @@ def BlockMasks(typ, sequence_length, block_size, precursor_token=False):
         mask = 1e7*(th.tril(th.ones(blocks, blocks), diagonal=-1)[:,None,:,None].tile(1,block_size,1,block_size).reshape(blocks*block_size, blocks*block_size) == 0).float()
     mask = mask[:sequence_length, :sequence_length]
     if precursor_token:
+        # Precursor can only see itself, and nothing else
         mask = th.cat([th.zeros(sequence_length, 1), mask], dim=1)
-        mask = th.cat([th.zeros(1, sequence_length+1), mask], dim=0)
+        horizontal = th.cat([th.zeros(1), th.full((sequence_length,), 1e7)])[None]
+        mask = th.cat([horizontal, mask], dim=0)
     return mask
