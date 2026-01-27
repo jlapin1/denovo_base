@@ -463,7 +463,7 @@ class BaseDenovo:
             # Do some resizing/reshaping
             prediction = prediction[..., :target.shape[1]] # loaded shapes can change based on batch
             probs = probs[:, :target.shape[1]]
-            predicted_probs = probs.softmax(-1).gather(-1, prediction[...,None].type(th.int64)).squeeze()
+            predicted_probs = probs.softmax(-1).gather(-1, prediction[...,None].type(th.int64)).squeeze(-1)
             
             # Cross entropy
             pred = probs.transpose(-1,-2)
@@ -639,6 +639,8 @@ class DenovoArDSObj(BaseDenovo):
             token_dict     = self.data.amod_dic,
             top_peaks      = config['top_peaks'],
         )
+        
+        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
 
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
 
@@ -651,7 +653,7 @@ class DenovoArDSObj(BaseDenovo):
             if config['load_last']:
                 self.load_saved_weights(self.opt, "opt", config['load_last'])     
                 U.optimizer_to(self.opt, device)
-
+        
         self.model.to(device)
     
     def inptarg(self, batch):
@@ -993,7 +995,7 @@ class DenovoMDLMObj(BaseDenovo):
         
         loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
         
-        weights = (target!=self.model.decoder.NT).float() + 0.1*(target==self.model.decoder.NT).float()
+        weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
         loss = (weights*loss)[masked_token_mask]
         token_nll = loss.mean()
         losses = {'loss': token_nll}

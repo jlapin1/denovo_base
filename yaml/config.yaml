@@ -27,12 +27,12 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: True
+log_wandb: False
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -40,12 +40,12 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms
-  val_name: cerevisiae
-  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
+  val_name: val
+  masses_path: /cmnfs/data/proteomics/foundational_model/MKB2
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MKB2/dictionary.tsv
   synonyms:
     - [I, L]
     #- [D, N+0.984]
@@ -68,7 +68,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: ar # *diff* | *mdlm* | *
 
 # Encoder model
 
@@ -101,11 +101,11 @@ encoder_dict:
 # Decoder model
 
 decoder_ar:
-  running_units: 768
-  max_sequence_length: 100
+  running_units: 512
+  max_sequence_length: 40
   depth: 9
   d: 64
-  h: 12
+  h: 8
   ffn_multiplier: 2
   ce_units: 256
   use_charge: True
@@ -171,7 +171,7 @@ decoder_diff:
     alphabet: False
     self_condition: True
     clamp_denoised: False
-    block_size: 5
+    block_size:
   # ensemble prediction
   ensemble:
     ensemble_n: 1

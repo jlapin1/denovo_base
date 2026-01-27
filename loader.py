@@ -51,6 +51,7 @@ def collate_fn(batch_list, custom_columns=[]):
     if 'tokenized_sequence' in batch_list[0].keys():
         out['peplen'] = th.tensor(np.stack([m['peptide_length'] for m in batch_list]), dtype=th.int32)
         out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)
+        #out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:41] for m in batch_list]), dtype=th.int32)
     if 'chimeric' in batch_list[0].keys():
         out['chimeric'] = th.tensor(np.stack([m['chimeric'] for m in batch_list]))
     if 'Hyperscore' in batch_list[0]:
@@ -82,8 +83,8 @@ class LoaderObj:
         return {b:a for a,b in amod_dic.items()}
 
     def synonym(self, token1, token2, amod_dic):
-        low = np.minimum(amod_dic[token1], amod_dic[token2])
-        high = np.maximum(amod_dic[token1], amod_dic[token2])
+        low = int(np.minimum(amod_dic[token1], amod_dic[token2]))
+        high = int(np.maximum(amod_dic[token1], amod_dic[token2]))
         amod_dic[token1] = amod_dic[token2] = low
         amod_dic = {key:value if value < high else value-1 for key, value in amod_dic.items()}
         return amod_dic

@@ -296,7 +296,7 @@ class DenovoDecoder(nn.Module):
         self.outdict = deepcopy(token_dict)
         self.inpdict = deepcopy(token_dict)
         self.NT = self.outdict['X']
-        self.inpdict['<SOS>'] = np.max(list(self.inpdict.values())) + 1
+        self.inpdict['<SOS>'] = int(np.max(list(self.inpdict.values())) + 1)
         self.start_token = self.inpdict['<SOS>']
         #self.inpdict['<h>'] = len(self.inpdict)
         #self.hidden_token = self.inpdict['<h>']
@@ -305,7 +305,7 @@ class DenovoDecoder(nn.Module):
         self.outdict['<EOS>'] = int(np.max(list(self.outdict.values())) + 1)
         self.EOS = self.outdict['<EOS>']
 
-        dec_config['num_inp_tokens'] = np.max(list(self.inpdict.values())) + 1
+        dec_config['num_inp_tokens'] = int(np.max(list(self.inpdict.values())) + 1)
         
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = len(np.unique(list(self.outdict.values())))
@@ -440,24 +440,27 @@ class DenovoDecoder(nn.Module):
     # The encoder's output should have always come from a batch loaded in 
     # from the dataset. The batch dictionary has any necessary inputs for
     # the decoder.
-    def predict_sequence(self, enc_out, batdic):
+    def predict_sequence(self, enc_out, batdic, return_full_logits=True):
 
         dev = enc_out['emb'].device
         bs = enc_out['emb'].shape[0]
         # starting intseq array
         intseq = self.initial_intseq(bs, self.max_sl).to(dev)
-        probs = th.zeros(bs, self.max_sl, self.predcats).to(dev)
+        probs_dims = (bs, self.max_sl, self.predcats) if return_full_logits else (bs, self.max_sl)
+        probs = th.zeros(*probs_dims).to(dev)
         for i in range(self.max_sl):
         
-            index = int(i)
-        
-            dec_out = self(intseq, enc_out, batdic, False)
+            dec_out = self(intseq[:, :i+1], enc_out, batdic, False)
 
-            predictions = self.greedy(dec_out[:, index])
-            probs[:,index,:] = dec_out[:,index]
+            predictions = self.greedy(dec_out[:, i])
+            if return_full_logits:
+                probs[:,i,:] = dec_out[:,i]
+            else:
+                probs[:,i] = dec_out[:,i].gather(dim=-1, index=predictions[:,None].type(th.int64)).squeeze(-1)
             
-            if index < self.max_sl-1:
-                intseq = self.set_tokens(intseq, index+1, predictions)
+            
+            if i < self.max_sl-1:
+                intseq = self.set_tokens(intseq, i+1, predictions)
         
         intseq = th.cat([intseq[:, 1:], predictions[:,None]], dim=1)
         
