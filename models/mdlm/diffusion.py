@@ -1001,7 +1001,9 @@ class Diffusion:
         model_output = model_output[:, :sl]
         masked_token_mask = masked_token_mask[:, :sl]
     utils.print_nans(model_output, 'model_output')
-    return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
+    
+    if self.config['custom_loss']:
+        return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
     
     if self.parameterization == 'sedd':
       return dsigma[:, None] * self._score_entropy(

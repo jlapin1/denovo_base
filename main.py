@@ -991,12 +991,14 @@ class DenovoMDLMObj(BaseDenovo):
         }
         
         backbone = self.model.decoder
-        model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
         
-        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
-        
-        weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
-        loss = (weights*loss)[masked_token_mask]
+        if self.diff_config['custom_loss']:
+            model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+            loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
+            weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
+            loss = (weights*loss)[masked_token_mask]
+        else:
+            loss = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
         token_nll = loss.mean()
         losses = {'loss': token_nll}
         
