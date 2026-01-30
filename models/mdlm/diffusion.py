@@ -995,7 +995,11 @@ class Diffusion:
                 model_output = backbone(xt, **model_kwargs)['out']
             model_kwargs['self_conditions'] = model_output.detach()
     
-    model_output = backbone(xt, **model_kwargs)['out']
+    model_output = (
+        backbone(xt, **model_kwargs)['out'] 
+        if self.config['custom_loss'] else 
+        self.forward(xt, sigma[:,None], model_kwargs=model_kwargs)[0]
+    )
 
     if block_training:
         model_output = model_output[:, :sl]
