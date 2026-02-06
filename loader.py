@@ -8,6 +8,7 @@ from glob import glob
 import sys
 import pandas as pd
 import numpy as np
+from operator import itemgetter
 join = os.path.join
 
 def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
@@ -33,7 +34,8 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
         peptide_length = len(tokenized_sequence)
         if reverse:
             tokenized_sequence = tokenized_sequence[::-1]
-        example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
+        #example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
+        example['tokenized_sequence'] = np.array(list(itemgetter(*tokenized_sequence)(dic)) + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
         example['peptide_length'] = peptide_length
     if 'name' in example: example['experiment_name'] = example['name'] # compat
 
@@ -298,6 +300,9 @@ class LoaderHF(LoaderObj):
         
         # Chimeric
         #dataset = dataset.filter(lambda example: example['chimeric'])
+        
+        # Hyperscore
+        #dataset = dataset.filter(lambda example: example['Hyperscore'] > 30)
 
         # Filter val set for dispersed examples
         if ('val_steps' in kwargs.keys()) and ('disperse' in kwargs.keys()):

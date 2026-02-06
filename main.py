@@ -215,14 +215,14 @@ class BaseDenovo:
                 self.running_loss = []
             if self.config['save_weights']:
                 self.save_last()
-            if self.eval_frequency is not None and self.config['save_weights']:
+            if self.eval_frequency is not None and (self.config['save_weights']|self.config['log_wandb']):
                 if time()-self.eval_time > self.eval_frequency:
                     out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
                     self.eval_out = out
                     new_score = out[self.config['high_score']]
-                    self.checkpoint(new_score)
-                    self.eval_time = time()
+                    if self.config['save_weights']: self.checkpoint(new_score)
                     if self.config['log_wandb']: wandb.log(out)
+                    self.eval_time = time()
             
             step_end = time()
             
