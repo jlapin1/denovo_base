@@ -12,23 +12,29 @@ from operator import itemgetter
 join = os.path.join
 
 def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
-    ab = example['intensity_array']
-    ab_sort = (-ab).argsort()[:top]
-    ab = ab[ab_sort]
-    ab /= ab.max()
-    spectrum_length = len(ab)
-    mz = example['mz_array'][ab_sort]
-    mz_sort = mz.argsort()
-    length = len(mz)
-    mz_ = np.zeros(top)
-    mz_[:len(mz_sort)] = mz[mz_sort]
-    ab_ = np.zeros(top)
-    ab_[:len(ab_sort)] = ab[mz_sort]
-    example['mz_array'] = mz_
-    example['intensity_array'] = ab_
-    example['precursor_charge'] = example['precursor_charge']
+    if 'intensity_array' in example:
+        ab = example['intensity_array']
+        ab_sort = (-ab).argsort()[:top]
+        ab = ab[ab_sort]
+        ab /= ab.max()
+        spectrum_length = len(ab)
+        mz = example['mz_array'][ab_sort]
+        mz_sort = mz.argsort()
+        length = len(mz)
+        mz_ = np.zeros(top)
+        mz_[:len(mz_sort)] = mz[mz_sort]
+        ab_ = np.zeros(top)
+        ab_[:len(ab_sort)] = ab[mz_sort]
+        example['mz_array'] = mz_
+        example['intensity_array'] = ab_
+        example['spectrum_length'] = spectrum_length #len(example['mz_array'])
+
+    if 'precursor_charge' in example:
+        example['precursor_charge'] = example['precursor_charge']
+    else:
+        np.random.choice([2,3,4])
     example['precursor_mass'] = example['precursor_mass']
-    example['spectrum_length'] = spectrum_length #len(example['mz_array'])
+    
     if 'modified_sequence' in example:
         tokenized_sequence = tokenizer(example['modified_sequence'])
         peptide_length = len(tokenized_sequence)

@@ -40,12 +40,12 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
+  train_dataset_path: /cmnfs/proj/xdenovoseq/dataset/pretrain
   train_name:
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
-  val_name: val
-  masses_path: /cmnfs/data/proteomics/foundational_model/MKB2
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/MKB2/dictionary.tsv
+  val_dataset_path: /cmnfs/proj/xdenovoseq/dataset/pretrain
+  val_name:
+  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/kingdoms/dictionary.tsv
   synonyms:
     - [I, L]
     #- [D, N+0.984]
@@ -171,7 +171,7 @@ decoder_diff:
     alphabet: False
     self_condition: True
     clamp_denoised: False
-    block_size: 4
+    block_size:
   # ensemble prediction
   ensemble:
     ensemble_n: 1
