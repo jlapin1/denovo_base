@@ -11,7 +11,7 @@ import numpy as np
 from operator import itemgetter
 join = os.path.join
 
-def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
+def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False, masses=None):
     if 'intensity_array' in example:
         ab = example['intensity_array']
         ab_sort = (-ab).argsort()[:top]
@@ -32,28 +32,38 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
     if 'precursor_charge' in example:
         example['precursor_charge'] = example['precursor_charge']
     else:
-        np.random.choice([2,3,4])
-    example['precursor_mass'] = example['precursor_mass']
+        example['precursor_charge'] = th.tensor(np.random.choice([2,3,4], p=[0.6,0.3,0.1],)).type(th.int32)
     
     if 'modified_sequence' in example:
-        tokenized_sequence = tokenizer(example['modified_sequence'])
+        sequence = re.sub("C", "C+57.021", example['modified_sequence'])
+        tokenized_sequence = tokenizer(sequence)
         peptide_length = len(tokenized_sequence)
         if reverse:
             tokenized_sequence = tokenized_sequence[::-1]
         #example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
         example['tokenized_sequence'] = np.array(list(itemgetter(*tokenized_sequence)(dic)) + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
         example['peptide_length'] = peptide_length
+
+    if 'precursor_mass' in example:
+        example['precursor_mass'] = example['precursor_mass']
+    elif 'modified_sequence' in example:
+        example['precursor_mass'] = (th.tensor(sum([masses[m] for m in tokenized_sequence])) + 18.010565) / example['precursor_charge'] + 1.00727646688
+    else:
+        example['precursor_mass'] = th.tensor(0.)
+
     if 'name' in example: example['experiment_name'] = example['name'] # compat
 
     return example
 
 def collate_fn(batch_list, custom_columns=[]):
     out = {}
-    out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
-    out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
-    maxlength = out['length'].max()
-    out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
-    out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    if 'experiment_name' in batch_list[0]:
+        out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
+    if 'ab' in batch_list[0]:
+        out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
+        maxlength = out['length'].max()
+        out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+        out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
     out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
     out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
     if 'tokenized_sequence' in batch_list[0].keys():
@@ -252,6 +262,7 @@ class LoaderHF(LoaderObj):
             top=top_pks, 
             max_seq=max_seq,
             reverse=reverse,
+            masses=self.massdic,
         )
         if 'remove_columns' in kwargs:
             remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]

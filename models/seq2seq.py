@@ -176,7 +176,19 @@ class Seq2SeqAR(Seq2Seq):
         return logits
 
     def predict_sequence(self, batch):
-        embedding = self.encoder_embedding(batch)
+        if 'ab' in batch:
+            bs, sl = batch['ab'].shape
+        elif 'intseq' in batch:
+            bs, pl = batch['intseq'].shape
+            device = batch['intseq'].device
+
+        if 'ab' not in batch:
+            embedding = {
+                'emb': th.zeros(bs, 100, self.encoder_dict['running_units']).to(device),
+                'mask': th.full((bs, 100), 1e7, dtype=th.float32).to(device)
+            }
+        else:
+            embedding = self.encoder_embedding(batch)
         out_dict = self.decoder.predict_sequence(embedding, batch)
         return out_dict
 
@@ -346,7 +358,10 @@ class Seq2SeqMDLM(Seq2Seq):
         progress: bool=False,    # tqdm progress bar
     ):
         # Input batch
-        batch_size, SL = batch['mz'].shape
+        if 'mz' in batch:
+            batch_size, SL = batch['mz'].shape
+        elif 'intseq' in batch:
+            batch_size, PL = batch['intseq'].shape
         n = self.ens_size if n==None else n
         batch = expand_batch(batch, n=n)
         
