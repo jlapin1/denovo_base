@@ -32,6 +32,44 @@ F = nn.functional
 choice = np.random.choice
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
+def _parse_overrides(argv):
+    overrides = []
+    for arg in argv:
+        if "=" not in arg:
+            raise ValueError(f"Override '{arg}' must be in key=value form.")
+        key, val = arg.split("=", 1)
+        overrides.append((key, yaml.safe_load(val)))
+    return overrides
+
+def _apply_overrides(cfg, overrides):
+    created = []
+    for keypath, value in overrides:
+        parts = keypath.split(".")
+        cur = cfg
+        for i, part in enumerate(parts):
+            last = i == len(parts) - 1
+            if isinstance(cur, list):
+                if not part.isdigit():
+                    raise KeyError(f"Expected list index at '{part}' in '{keypath}'.")
+                idx = int(part)
+                if idx >= len(cur):
+                    raise IndexError(f"Index {idx} out of range for '{keypath}'.")
+                if last:
+                    cur[idx] = value
+                else:
+                    cur = cur[idx]
+            else:
+                if last:
+                    if part not in cur:
+                        created.append(keypath)
+                    cur[part] = value
+                else:
+                    if part not in cur or cur[part] is None:
+                        cur[part] = {}
+                        created.append(".".join(parts[:i+1]))
+                    cur = cur[part]
+    return created
+
 class BaseDenovo:
     def __init__(self, config, svdir='./downstream/', rddir=None):
         
@@ -1146,14 +1184,16 @@ if __name__ == '__main__':
         config_path = sys.argv[1]
     else:
         config_path = "./yaml/config.yaml"
+    overrides = _parse_overrides(sys.argv[2:]) if len(sys.argv) > 2 else []
 
     # Read yamls
     with open(config_path) as stream:
         config = yaml.safe_load(stream)
+    created_paths = _apply_overrides(config, overrides) if overrides else []
     if 'pre_train_eval' not in config:
         config['pre_train_eval'] = False
     # Overrides over a loaded previous experiment
-    config_ = config.copy()
+    config_ = deepcopy(config)
     # Eval config will not be overwritten
     with open("./yaml/eval.yaml") as stream:
         evconfig = yaml.safe_load(stream)
@@ -1166,6 +1206,8 @@ if __name__ == '__main__':
     is_main = U.is_main_process()
     if dist_info["distributed"] and th.distributed.is_initialized():
         th.distributed.barrier()
+    if overrides and is_main and created_paths:
+        print(f"<DSCOMMENT> CLI overrides created new keys: {sorted(set(created_paths))}")
 
     ########################################################
     # Create experiment directory in save/downstream_only/ #
@@ -1199,6 +1241,8 @@ if __name__ == '__main__':
                 config_[key]['dictionary_path'] = config[key]['dictionary_path']
                 config_[key]['reverse'] = config[key]['reverse']
             config[key] = config_[key]
+        if overrides:
+            _apply_overrides(config, overrides)
             
     # Create new experiment
     elif config['save_weights'] and not config['eval_only']:
