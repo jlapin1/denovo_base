@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import load_dataset, IterableDataset
 from torch.utils.data import DataLoader
 import torch as th
 import os
@@ -8,6 +8,7 @@ from glob import glob
 import sys
 import pandas as pd
 import numpy as np
+import math
 join = os.path.join
 
 def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
@@ -62,13 +63,14 @@ def collate_fn(batch_list, custom_columns=[]):
     return out
 
 class LoaderObj:
-    def build_dataloader(self, dataset, batch_size, num_workers, collate_fn, shuffle=False):
+    def build_dataloader(self, dataset, batch_size, num_workers, collate_fn, shuffle=False, drop_last=False):
         return DataLoader(
             dataset,
             batch_size=batch_size,
             num_workers=num_workers,
             collate_fn=collate_fn,
             shuffle=shuffle,
+            drop_last=drop_last,
         )
     
     def create_sequence_dictionary(self, dictionary_path):
@@ -234,6 +236,23 @@ class LoaderHF(LoaderObj):
         
         dataset['val'] = dataset_val['train']
 
+        # Optional debug subset to speed up iteration
+        debug_subset = kwargs.get('debug_subset')
+        if debug_subset is not None:
+            def subset(ds):
+                if isinstance(ds, IterableDataset):
+                    return ds.take(int(debug_subset))
+                max_n = min(int(debug_subset), len(ds))
+                return ds.select(range(max_n))
+            dataset['train'] = subset(dataset['train'])
+            dataset['val'] = subset(dataset['val'])
+            if 'test' in dataset:
+                dataset['test'] = subset(dataset['test'])
+            if self.train_size not in [None, float('inf')]:
+                self.train_size = min(self.train_size, int(debug_subset))
+            if self.val_size not in [None, float('inf')]:
+                self.val_size = min(self.val_size, int(debug_subset))
+
         #########################
         # Map to format outputs #
         #########################
@@ -310,6 +329,24 @@ class LoaderHF(LoaderObj):
                 dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
                 self.val_size = kwargs['val_steps'] * batch_size
         
+        # Shard dataset for distributed training (must occur before shuffle)
+        world_size = utils.get_world_size()
+        rank = utils.get_rank()
+        if world_size > 1:
+            def shard_dataset(ds):
+                if isinstance(ds, IterableDataset):
+                    return ds.filter(lambda _, idx: idx % world_size == rank, with_indices=True)
+                return ds.shard(num_shards=world_size, index=rank, contiguous=False)
+            dataset['train'] = shard_dataset(dataset['train'])
+            if 'val' in dataset:
+                dataset['val'] = shard_dataset(dataset['val'])
+            if 'test' in dataset:
+                dataset['test'] = shard_dataset(dataset['test'])
+            if self.train_size not in [None, float('inf')]:
+                self.train_size = int(np.ceil(self.train_size / world_size))
+            if self.val_size not in [None, float('inf')]:
+                self.val_size = int(np.ceil(self.val_size / world_size))
+
         # Shuffle the dataset
         if 'buffer_size' in kwargs.keys():
             dataset['train'] = dataset['train'].shuffle(buffer_size=kwargs['buffer_size'])
@@ -323,8 +360,9 @@ class LoaderHF(LoaderObj):
         ###############
         num_workers = min(self.dataset['train'].n_shards, num_workers)
         eval_collate_function = lambda x: collate_fn(x, custom_columns=custom_columns)
+        drop_last_train = utils.get_world_size() > 1
         self.dataloader = {
-            'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn),
+            'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn, drop_last=drop_last_train),
             'val':   self.build_dataloader(dataset['val']  , batch_size, 0, eval_collate_function),
             'test':  self.build_dataloader(dataset['test'] , batch_size, 0, eval_collate_function),
         }
@@ -448,4 +486,3 @@ class LoaderCls(LoaderObj):
         intseq[eos_inds] = self.EOS
 
         return intseq
-

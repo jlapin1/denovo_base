@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
+import contextlib
 #import torchmetrics
 #import transformers
 from torch import Tensor
@@ -280,7 +281,11 @@ class Diffusion:
     """Returns log score."""
     sigma = self._process_sigma(sigma)
     model_kwargs['timesteps'] = sigma
-    with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float32):
+    if torch.cuda.is_available():
+      amp_ctx = torch.amp.autocast('cuda', dtype=torch.float32)
+    else:
+      amp_ctx = contextlib.nullcontext()
+    with amp_ctx:
       logits = self.backbone(x, **model_kwargs)['out']
     
     if self.parameterization == 'subs':
@@ -989,7 +994,7 @@ class Diffusion:
         xt = torch.cat([xt, x0], dim=1)
 
     if self.config['model']['self_condition']:
-        model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
+        model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=xt.device)
         if np.random.uniform() > 0.5:
             with torch.no_grad():
                 model_output = backbone(xt, **model_kwargs)['out']

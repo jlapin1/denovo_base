@@ -9,6 +9,67 @@ from copy import deepcopy
 import datetime
 import re
 import os
+import torch.distributed as dist
+
+def dist_is_initialized():
+    return dist.is_available() and dist.is_initialized()
+
+def get_rank():
+    return dist.get_rank() if dist_is_initialized() else 0
+
+def get_world_size():
+    return dist.get_world_size() if dist_is_initialized() else 1
+
+def is_main_process():
+    return get_rank() == 0
+
+def init_distributed(backend=None):
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    if world_size > 1 and not dist_is_initialized():
+        if backend is None:
+            backend = "nccl" if th.cuda.is_available() else "gloo"
+        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+        if th.cuda.is_available():
+            th.cuda.set_device(local_rank)
+    return {
+        "distributed": dist_is_initialized(),
+        "rank": get_rank(),
+        "world_size": get_world_size(),
+        "local_rank": local_rank,
+    }
+
+def get_device():
+    if th.cuda.is_available():
+        if dist_is_initialized():
+            return th.device("cuda", th.cuda.current_device())
+        return th.device("cuda")
+    return th.device("cpu")
+
+def all_reduce_tensor(tensor, op=dist.ReduceOp.SUM):
+    if not dist_is_initialized():
+        return tensor
+    dist.all_reduce(tensor, op=op)
+    return tensor
+
+def reduce_dict(input_dict, average=True, device=None):
+    if not dist_is_initialized():
+        return input_dict
+    reduced = {}
+    world_size = get_world_size()
+    for k, v in input_dict.items():
+        if isinstance(v, th.Tensor):
+            t = v.detach()
+            if device is not None:
+                t = t.to(device)
+        else:
+            t = th.tensor(float(v), device=device if device is not None else "cpu")
+        dist.all_reduce(t, op=dist.ReduceOp.SUM)
+        if average:
+            t = t / world_size
+        reduced[k] = t
+    return reduced
 
 def timestamp():
     dt = str(datetime.datetime.now()).split()

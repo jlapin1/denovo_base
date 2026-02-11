@@ -471,12 +471,16 @@ class MDLMDecoder(base_diffusion_decoder):
 
         self.max_sl = decoder_config['sequence_length'] # + 1
 
-        # Timestep embedding
-        self.time_embed = nn.Sequential(
-            nn.Linear(timestep_dimension, timestep_dimension),
-            nn.SiLU(),
-            nn.Linear(timestep_dimension, timestep_dimension),
-        )
+        # Timestep embedding (optional)
+        self.use_time_embed = bool(kwargs.get('use_time_embed', False))
+        if self.use_time_embed:
+            self.time_embed = nn.Sequential(
+                nn.Linear(timestep_dimension, timestep_dimension),
+                nn.SiLU(),
+                nn.Linear(timestep_dimension, timestep_dimension),
+            )
+        else:
+            self.time_embed = None
         
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
@@ -532,7 +536,9 @@ class MDLMDecoder(base_diffusion_decoder):
         doubled=False,
     ):
         # Timestep
-        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
+        time_emb = None
+        if self.time_embed is not None:
+            time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
 
         # Beginning
         seq_emb = self.embed_sequence(x)

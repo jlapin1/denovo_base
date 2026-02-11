@@ -26,6 +26,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import math
+from torch.nn.parallel import DistributedDataParallel as DDP
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
@@ -97,11 +98,23 @@ class BaseDenovo:
         self.training_loss_keys = []
         self.eval_stats = []
         self.eval_kwargs = {}
+        self.distributed = U.dist_is_initialized()
+        self.rank = U.get_rank()
+        self.world_size = U.get_world_size()
+        self.is_main = U.is_main_process()
+
+    def get_model(self):
+        return self.model.module if isinstance(self.model, DDP) else self.model
 
     def save_weights(self, fp='./model.wts'):
-        th.save(self.model.state_dict(), fp)
+        if not self.is_main:
+            return
+        model = self.model.module if isinstance(self.model, DDP) else self.model
+        th.save(model.state_dict(), fp)
     
     def save_last(self, override=False):
+        if not self.is_main:
+            return
         ready = self.global_step - self.save_last_counter >= self.config['save_last_freq']
         if ready or override:
             self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
@@ -109,6 +122,8 @@ class BaseDenovo:
             self.save_last_counter = self.global_step
     
     def checkpoint(self, score):
+        if not self.is_main:
+            return
         self.save_last(override=True)
         if score > self.high_score:
             self.high_score = score
@@ -140,7 +155,8 @@ class BaseDenovo:
                     qualifier = '"last"'
             
             print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
-            obj.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
+            target = obj.module if isinstance(obj, DDP) else obj
+            target.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
             if retain:
                 try:
@@ -187,52 +203,79 @@ class BaseDenovo:
         
         # Progress bar
         train_steps = int(self.data.train_size // bs)
-        pbar = tqdm(self.data.dataloader['train'], total=train_steps, smoothing=0.6)
+        max_train_batches = self.config.get('max_train_batches')
+        if max_train_batches is not None:
+            train_steps = min(train_steps, int(max_train_batches))
+        pbar = tqdm(
+            self.data.dataloader['train'], 
+            total=train_steps, 
+            smoothing=0.6, 
+            disable=(not self.is_main),
+        )
 
         epoch_start = time()
         step_end=epoch_start
         for step, batch in enumerate(pbar):      
             step_start = time()
+            if max_train_batches is not None and step >= max_train_batches:
+                break
             
-            if self.config['log_wandb']: wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
+            if self.config['log_wandb'] and self.is_main:
+                wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
             
+            if self.config.get('debug_timing') and self.is_main:
+                print(f"[debug] train_step {step} start")
             losses = self.train_step(batch)
+            if self.config.get('debug_timing') and self.is_main:
+                print(f"[debug] train_step {step} done in {time() - step_start:.2f}s")
+            losses_reduced = U.reduce_dict(losses, average=True, device=device)
             self.global_step += 1
             
             if self.config['log_wandb']:
-                loss_printout = 'Loss: %7f'%losses['loss']
+                loss_printout = 'Loss: %7f'%losses_reduced['loss']
                 global_grad_norm = U.global_grad_norm(self.model)
-                self.log_wandb(losses, global_grad_norm)
+                if self.distributed:
+                    global_grad_norm = U.all_reduce_tensor(th.tensor(global_grad_norm, device=device)) / self.world_size
+                    global_grad_norm = float(global_grad_norm.cpu().item())
+                if self.is_main:
+                    self.log_wandb(losses_reduced, global_grad_norm)
             else:
-                for key in running_loss.keys(): running_loss[key].append(losses[key].detach().cpu())
-                rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
-                loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
-            pbar.set_description(f"Loss: {loss_printout}")
+                if self.is_main:
+                    for key in running_loss.keys(): running_loss[key].append(losses_reduced[key].detach().cpu())
+                    rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
+                    loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
+            if self.is_main:
+                pbar.set_description(f"Loss: {loss_printout}")
             
-            self.running_loss.append(losses['loss'].detach().cpu())
-            if self.log and (self.global_step % svfreq == 0):
-                self.savetxt(self.running_loss)
-                self.running_loss = []
-            if self.config['save_weights']:
-                self.save_last()
+            if self.is_main:
+                self.running_loss.append(losses_reduced['loss'].detach().cpu())
+                if self.log and (self.global_step % svfreq == 0):
+                    self.savetxt(self.running_loss)
+                    self.running_loss = []
+                if self.config['save_weights']:
+                    self.save_last()
             if self.eval_frequency is not None and self.config['save_weights']:
                 if time()-self.eval_time > self.eval_frequency:
                     out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
                     self.eval_out = out
                     new_score = out[self.config['high_score']]
-                    self.checkpoint(new_score)
+                    if self.is_main:
+                        self.checkpoint(new_score)
                     self.eval_time = time()
-                    if self.config['log_wandb']: wandb.log(out)
+                    if self.config['log_wandb'] and self.is_main: wandb.log(out)
             
             step_end = time()
             
-        if self.log and (len(self.running_loss) > 0):
+        if self.log and (len(self.running_loss) > 0) and self.is_main:
             self.savetxt(self.running_loss)
             self.running_loss = []
         
-        print("\rFinal running loss: %s, Final time elapsed: %.0f s"%(loss_printout, time()-epoch_start))
+        if self.is_main:
+            print("\rFinal running loss: %s, Final time elapsed: %.0f s"%(loss_printout, time()-epoch_start))
         
     def savetxt(self, train_loss=None, eval_stats=None):
+        if not self.is_main:
+            return
         if eval_stats is not None:
             np.savetxt(os.path.join(self.svdir, "eval_stats.txt"), np.array(eval_stats), fmt='%.6f', header=self.header)
         if train_loss is not None:
@@ -269,7 +312,8 @@ class BaseDenovo:
             intseq = intseq[None]
         bs, sl = intseq.shape
         eos_inds = (th.arange(bs, device=intseq.device), lengths)
-        intseq[eos_inds] = self.model.decoder.EOS
+        model = self.get_model()
+        intseq[eos_inds] = model.decoder.EOS
 
         return intseq
 
@@ -277,7 +321,8 @@ class BaseDenovo:
         if len(intseq.shape) == 1:
             intseq = intseq[None]
         bs, sl = intseq.shape
-        nulls = th.fill(th.empty(bs, dtype=th.int64), self.model.decoder.NT).to(intseq.device)
+        model = self.get_model()
+        nulls = th.fill(th.empty(bs, dtype=th.int64), model.decoder.NT).to(intseq.device)
         out = th.cat([intseq, nulls[:,None]], dim=-1)
 
         return out
@@ -286,12 +331,13 @@ class BaseDenovo:
         if len(intseq.shape) == 1:
             intseq = intseq[None]
         bs, sl = intseq.shape
-        length = ((intseq == self.model.decoder.EOS)|(intseq == self.model.decoder.NT)).int().argmax(1)
-        intseq[th.arange(bs), length] = self.model.decoder.EOS
+        model = self.get_model()
+        length = ((intseq == model.decoder.EOS)|(intseq == model.decoder.NT)).int().argmax(1)
+        intseq[th.arange(bs), length] = model.decoder.EOS
         mask = (length > 0)[:,None]
         index_array = th.arange(sl)[None].repeat([bs, 1]).to(intseq.device)
         boolean_array = index_array > length[:, None]
-        intseq[mask & boolean_array] = self.model.decoder.NT
+        intseq[mask & boolean_array] = model.decoder.NT
 
         return intseq
 
@@ -299,10 +345,11 @@ class BaseDenovo:
         if len(intseq.shape) == 1:
             intseq = intseq[None]
         is_reverse = lambda x: x[::-1] if self.reverse else x
+        model = self.get_model()
         return [
             is_reverse([
-                self.model.decoder.rev_outdict[int(n)] 
-                for n in m if n not in [self.model.decoder.NT, self.model.decoder.EOS]
+                model.decoder.rev_outdict[int(n)] 
+                for n in m if n not in [model.decoder.NT, model.decoder.EOS]
             ])
             for m in intseq
         ]
@@ -319,6 +366,14 @@ class BaseDenovo:
         save_keys=[],
     ):
         schema_defined = False
+        if self.distributed:
+            # Avoid filename collisions; write one file per rank
+            rank = self.rank
+            if output_filename is not None:
+                if output_filename.endswith(".parquet"):
+                    output_filename = output_filename[:-8] + f".rank{rank}.parquet"
+                else:
+                    output_filename = f"{output_filename}.rank{rank}"
 
         def initial_dataframe(additional_keys: list=[]):
             out = {
@@ -336,10 +391,10 @@ class BaseDenovo:
         )
         pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=True)
         pbar.set_description(f"Inference")
-        self.model.eval()
+        model = self.get_model()
+        model.eval()
         for i, batch in enumerate(pbar):
-            
-            if i == max_batches:
+            if i >= max_batches:
                 break
 
             #print("\rEvaluation step %d"%(i+1), end='')
@@ -347,10 +402,10 @@ class BaseDenovo:
             if no_grad:
                 with th.no_grad():
                     #seqint, target, loss_mask = self.inptarg(batchdev)
-                    out_dict = self.model.predict_sequence(batchdev, **kwargs)
+                    out_dict = model.predict_sequence(batchdev, **kwargs)
             else:
                 #seqint, target, loss_mask = self.inptarg(batchdev)
-                out_dict = self.model.predict_sequence(batchdev, **kwargs)
+                out_dict = model.predict_sequence(batchdev, **kwargs)
             
             # process prediction
             prediction = out_dict.pop('prediction')
@@ -393,7 +448,8 @@ class BaseDenovo:
                     schema_defined = True
                 writer.write_table(table)
                 dataframe = initial_dataframe()
-        writer.close()
+        if stream_write and schema_defined:
+            writer.close()
 
     def evaluation(
         self, 
@@ -425,14 +481,15 @@ class BaseDenovo:
             }
             for key in extra_keys: dataframe[key] = []
             return dataframe
-        if save_df or stream_write:
+        if (save_df or stream_write) and self.is_main:
             dataframe = initial_dataframe()
             schema_defined = False
         else:
             dataframe = None
 
         # losses
-        out = {'ce': 0}
+        out = {'ce': th.tensor(0.0, device=device)}
+        token_count = th.tensor(0.0, device=device)
         tots = {'sum':{}, 'total': {}}
 
         # Progress bar
@@ -440,23 +497,25 @@ class BaseDenovo:
             self.data.val_size // self.data.dataloader[dset].batch_size,
             max_batches,
         )
-        pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=False)
+        pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=False, disable=(not self.is_main))
         pbar.set_description(f"Evaluation")
-        self.model.eval()
+        model = self.get_model()
+        model.eval()
+        steps = 0
         for i, batch in enumerate(pbar):
-            
-            if i == max_batches:
+            if i >= max_batches:
                 break
+            steps += 1
 
             #print("\rEvaluation step %d"%(i+1), end='')
             batchdev = U.Dict2dev(batch, device)
             if no_grad:
                 with th.no_grad():
                     seqint, target, loss_mask = self.inptarg(batchdev)
-                    out_dict = self.model.predict_sequence(batchdev, **kwargs)
+                    out_dict = model.predict_sequence(batchdev, **kwargs)
             else:
                 seqint, target, loss_mask = self.inptarg(batchdev)
-                out_dict = self.model.predict_sequence(batchdev, **kwargs)
+                out_dict = model.predict_sequence(batchdev, **kwargs)
             prediction = out_dict.pop('prediction')
             probs = out_dict.pop('logits')
             
@@ -467,9 +526,9 @@ class BaseDenovo:
             
             # Cross entropy
             pred = probs.transpose(-1,-2)
-            out['ce'] += (
-                F.cross_entropy(pred, target, reduction='none')[loss_mask].sum()
-            )
+            ce_sum = F.cross_entropy(pred, target, reduction='none')[loss_mask].sum()
+            out['ce'] += ce_sum
+            token_count += loss_mask.sum()
             
             # Deepnovo metrics
             prediction = self.fill_null_after_first_eos_token(prediction)
@@ -489,15 +548,7 @@ class BaseDenovo:
                 },
             }
 
-            # Add to totals
-            for metric in dn_metrics['sum'].keys():
-                if metric not in tots['sum'].keys():
-                    tots['sum'][metric] = 0
-                    tots['total'][metric] = 0
-                tots['sum'][metric] += dn_metrics['sum'][metric]
-                tots['total'][metric] += dn_metrics['total'][metric]
-            
-            if save_df or stream_write:
+            if (save_df or stream_write) and self.is_main:
                 self.on_eval_step_end(batchdev, out_dict, dataframe)
                 dataframe['name'].extend(batch['experiment_name'])
                 if 'chimeric' in batch:
@@ -522,7 +573,7 @@ class BaseDenovo:
                 array = np.array([len(value) for key, value in dataframe.items()])
                 assert (length_first == array).all(), f"batch#: {i}, {dataframe.keys()}, {array}"
 				
-                if stream_write and ((i+1) % batches_btw_write == 0):
+                if stream_write and ((i+1) % batches_btw_write == 0) and self.is_main:
                     dataframe_ = {key: value for key, value in dataframe.items() if len(value)>0}   
                     table = pa.Table.from_pandas(pd.DataFrame(dataframe_), preserve_index=False)
                     if not schema_defined:
@@ -541,20 +592,39 @@ class BaseDenovo:
 
             #self.on_eval_step_end(target, loss_mask, dataframe=dataframe)
         
-        steps = i+1
-        totsz = self.config['batch_size']*steps
-        out['ce'] = float((out['ce'] / (totsz * self.config['sl'])).cpu().detach().numpy())
-        for metric in tots['sum'].keys():
-            out[metric] = tots['sum'][metric] /  tots['total'][metric]
+        steps_tensor = th.tensor(float(steps), device=out['ce'].device)
+        if self.distributed:
+            steps_tensor = U.all_reduce_tensor(steps_tensor, op=th.distributed.ReduceOp.SUM)
+            out['ce'] = U.all_reduce_tensor(out['ce'].detach(), op=th.distributed.ReduceOp.SUM)
+            token_count = U.all_reduce_tensor(token_count.detach(), op=th.distributed.ReduceOp.SUM)
+            for metric in tots['sum'].keys():
+                sum_t = th.tensor(float(tots['sum'][metric]), device=out['ce'].device)
+                tot_t = th.tensor(float(tots['total'][metric]), device=out['ce'].device)
+                sum_t = U.all_reduce_tensor(sum_t, op=th.distributed.ReduceOp.SUM)
+                tot_t = U.all_reduce_tensor(tot_t, op=th.distributed.ReduceOp.SUM)
+                tots['sum'][metric] = float(sum_t.cpu().item())
+                tots['total'][metric] = float(tot_t.cpu().item())
+        steps_val = int(steps_tensor.cpu().item())
+        if steps_val == 0:
+            raise RuntimeError("No evaluation batches were processed; check dataset, sharding, and val_steps.")
+        token_count_val = float(token_count.cpu().item())
+        if token_count_val == 0:
+            out['ce'] = float('nan')
+            for metric in tots['sum'].keys():
+                out[metric] = float('nan')
+        else:
+            out['ce'] = float((out['ce'] / token_count_val).cpu().detach().numpy())
+            for metric in tots['sum'].keys():
+                out[metric] = tots['sum'][metric] /  tots['total'][metric]
         
         self.on_eval_end()
         
-        if stream_write and (len(dataframe['name']) > 0):
+        if stream_write and self.is_main and (len(dataframe['name']) > 0):
             table = pa.Table.from_pandas(pd.DataFrame(dataframe), preserve_index=False)
             writer.write_table(table)
             writer.close()
             return out, None
-        elif save_df:   
+        elif save_df and self.is_main:   
             return out, pd.DataFrame(dataframe)
         else:
             return out, None
@@ -562,6 +632,7 @@ class BaseDenovo:
     def TrainEval(self, eval_dset='val'):
         start_time = time()
         lines = []
+        highline = None
         for i in range(self.config['epochs']):
             
             # Train
@@ -573,10 +644,10 @@ class BaseDenovo:
             if self.eval_frequency is None:
                 out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
                 new_score = out[self.config["high_score"]]
-                if self.config['save_weights']: self.checkpoint(new_score)
+                if self.config['save_weights'] and self.is_main: self.checkpoint(new_score)
             
                 # Logging
-                if self.config['log_wandb']:
+                if self.config['log_wandb'] and self.is_main:
                     out['epoch'] = i+1
                     wandb.log(out)
                     out.pop('epoch')
@@ -592,7 +663,8 @@ class BaseDenovo:
                 highline = line
             line += " (%.1f s)"%(time()-start_time)
             lines.append(line)
-            print("\r"+line)
+            if self.is_main:
+                print("\r"+line)
             
             # Saving the checkpoint
             #if self.config['save_weights']:
@@ -607,9 +679,11 @@ class BaseDenovo:
             self.eval_stats.append(list(out.values()))
             
             # Save data
-            if self.log:
+            if self.log and self.is_main:
                 self.savetxt(train_loss=None, eval_stats=np.array(self.eval_stats))
             
+        if highline is None:
+            highline = lines[-1] if len(lines) > 0 else ""
         return lines, highline
 
     def on_train_epoch_end(self, *args, **kwargs):
@@ -872,6 +946,32 @@ class DenovoDiffusionObj(BaseDenovo):
     def on_eval_end(self):
         pass
 
+class MDLMTrainWrapper(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, batch, target, training_mask, block_decoding, custom_loss):
+        embedding = self.model.encoder_embedding(batch)
+        model_kwargs = {
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+            'kv_features': embedding['emb'],
+            'seqmask': training_mask,
+            'doubled': True if block_decoding else False,
+        }
+        backbone = self.model.decoder
+        if custom_loss:
+            model_output, weights, masked_token_mask, _ = self.model.diff_obj._forward_pass_diffusion(
+                backbone, target, model_kwargs, block_decoding
+            )
+            loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
+            weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
+            loss = (weights*loss)[masked_token_mask]
+        else:
+            loss = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+        return loss
+
 class DenovoMDLMObj(BaseDenovo):
     def __init__(self, config, svdir='./save/', rddir=None):
         super().__init__(
@@ -885,6 +985,8 @@ class DenovoMDLMObj(BaseDenovo):
         from models.seq2seq import Seq2SeqMDLM
         
         diff_config = config['decoder_mdlm']['diffusion_config']
+        if 'custom_loss' not in diff_config:
+            diff_config['custom_loss'] = True
         self.diff_config = diff_config
         self.max_length = diff_config['model']['length']
         self.steps = diff_config['sampling']['steps']
@@ -932,6 +1034,20 @@ class DenovoMDLMObj(BaseDenovo):
             U.optimizer_to(self.opt, device)
         
         self.model.to(device)
+        # Ensure diffusion object uses correct device
+        self.model.diff_obj.device = device
+        # DDP training wrapper (keeps inference model unwrapped)
+        self.train_wrapper = MDLMTrainWrapper(self.model).to(device)
+        self.ddp_train_wrapper = None
+        if self.distributed:
+            if device.type == "cuda":
+                self.ddp_train_wrapper = DDP(
+                    self.train_wrapper,
+                    device_ids=[device.index],
+                    output_device=device.index,
+                )
+            else:
+                self.ddp_train_wrapper = DDP(self.train_wrapper)
 
         self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
         self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token).to(device)
@@ -963,42 +1079,32 @@ class DenovoMDLMObj(BaseDenovo):
         #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
         
         target = deepcopy(batch['intseq'])
-        target = self.model.decoder.append_null_token(target)
-        target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
+        model = self.get_model()
+        target = model.decoder.append_null_token(target)
+        target = model.decoder.replace_with_eos_token(target, batch['peplen'])
         
-        loss_mask = self.model.decoder.sequence_mask(target)
+        loss_mask = model.decoder.sequence_mask(target)
         
         return None, target, loss_mask
 
     def train_step(self, batch):
-        block_decoding = True if self.model.decoder.block_size is not None else False
+        model = self.get_model()
+        block_decoding = True if model.decoder.block_size is not None else False
         batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
-        training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size, True)[None,None] if block_decoding else None
+        training_mask = self.FullBlockMask(target.shape[1], model.decoder.block_size, True)[None,None] if block_decoding else None
         
-        self.model.to(device)
-        self.model.train()
-        self.model.zero_grad()
-        
-        embedding = self.model.encoder_embedding(batch)
-        
-        model_kwargs = {
-            'charge': batch['charge'] if 'charge' in batch else None,
-            'mass': batch['mass'] if 'mass' in batch else None,
-            'kv_features': embedding['emb'],
-            'seqmask': training_mask,
-            'doubled': True if block_decoding else False,
-        }
-        
-        backbone = self.model.decoder
-        
-        if self.diff_config['custom_loss']:
-            model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
-            loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
-            weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
-            loss = (weights*loss)[masked_token_mask]
+        model.to(device)
+        if self.ddp_train_wrapper is not None:
+            self.ddp_train_wrapper.train()
         else:
-            loss = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+            model.train()
+        model.zero_grad()
+        
+        if self.ddp_train_wrapper is not None:
+            loss = self.ddp_train_wrapper(batch, target, training_mask, block_decoding, self.diff_config['custom_loss'])
+        else:
+            loss = self.train_wrapper(batch, target, training_mask, block_decoding, self.diff_config['custom_loss'])
         token_nll = loss.mean()
         losses = {'loss': token_nll}
         
@@ -1020,7 +1126,8 @@ class DenovoMDLMObj(BaseDenovo):
             try:
                 avg_loss = self.token_loss / (self.token_count+1e-5)
                 avg_loss = avg_loss.cpu().detach().numpy()
-                np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
+                if self.is_main:
+                    np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
                 self.initialize_token_loss()
             except:
                 pass
@@ -1040,23 +1147,25 @@ if __name__ == '__main__':
     else:
         config_path = "./yaml/config.yaml"
 
-    #######################
-    # Configuration files #
-    #######################
-
-    if len(sys.argv) > 1:
-        config_path = sys.argv[1]
-    else:
-        config_path = "./yaml/config.yaml"
-
     # Read yamls
     with open(config_path) as stream:
         config = yaml.safe_load(stream)
+    if 'pre_train_eval' not in config:
+        config['pre_train_eval'] = False
     # Overrides over a loaded previous experiment
     config_ = config.copy()
     # Eval config will not be overwritten
     with open("./yaml/eval.yaml") as stream:
         evconfig = yaml.safe_load(stream)
+
+    #############################################
+    # Distributed initialization and device set #
+    #############################################
+    dist_info = U.init_distributed()
+    device = U.get_device()
+    is_main = U.is_main_process()
+    if dist_info["distributed"] and th.distributed.is_initialized():
+        th.distributed.barrier()
 
     ########################################################
     # Create experiment directory in save/downstream_only/ #
@@ -1068,7 +1177,7 @@ if __name__ == '__main__':
         rddir = os.path.join(config['prev_wts'])
         if config['new_exp']:
             svdir = os.path.join('save', timestamp)
-            if not config['eval_only']:
+            if not config['eval_only'] and is_main:
                 U.create_experiment(svdir, svwts=config['save_weights'])
                 print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
         else:
@@ -1095,11 +1204,15 @@ if __name__ == '__main__':
     elif config['save_weights'] and not config['eval_only']:
         rddir = None
         svdir = os.path.join('save', timestamp)
-        U.create_experiment(svdir, svwts=config['save_weights'])
-        print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+        if is_main:
+            U.create_experiment(svdir, svwts=config['save_weights'])
+            print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
     else:
         rddir = None
         svdir = './'
+
+    if dist_info["distributed"] and th.distributed.is_initialized():
+        th.distributed.barrier()
 
     # Eval only. Must set before loader is created.
     if config['eval_only']:
@@ -1126,7 +1239,7 @@ if __name__ == '__main__':
         D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)
 
     # WandB
-    if config['log_wandb'] and (config['eval_only'] == False):
+    if config['log_wandb'] and (config['eval_only'] == False) and is_main:
         wandb.init(
             project=config['wandb_project'],
             entity=config['wandb_entity'],
@@ -1191,8 +1304,9 @@ if __name__ == '__main__':
                     df.to_parquet(eval_out_path)
             print("\n", out)
     else:
-        print("Test validation", end='')
-        out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-        assert D.config['high_score'] in out.keys()
-        print("\rTest validation passed")
+        if config.get('pre_train_eval', False):
+            print("Test validation", end='')
+            out, _ = D.evaluation(dset='val', max_batches=D.val_steps, kwargs=D.eval_kwargs)
+            assert D.config['high_score'] in out.keys()
+            print("\rTest validation passed")
         print(D.TrainEval()[-1])

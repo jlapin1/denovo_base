@@ -120,7 +120,7 @@ class Seq2Seq(nn.Module):
 
         mzab = th.cat([batch['mz'][...,None], batch['ab'][...,None]], -1)
         model_inp = {
-            'x': mzab.to(device),
+            'x': mzab,
             'charge': (
                 batch['charge'] if self.encoder.use_charge else None
             ),
@@ -358,11 +358,11 @@ class Seq2SeqMDLM(Seq2Seq):
         # Probability calculations
         if save_p and save_x:
             nbs, sl = seqs.shape
-            slmask = th.arange(sl, device=device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
+            slmask = th.arange(sl, device=seqs.device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
             diffout['aa_prob_min'], diffout['pep_prob_min'] = self.calculate_min_peptide_prob(seqs, diffout['p_save'], slmask)
             
             reveal = self.get_reveal_steps(diffout['x_save'])
-            reveal_mask = th.arange(diffout['p_save'].shape[1], device=device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
+            reveal_mask = th.arange(diffout['p_save'].shape[1], device=seqs.device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
             diffout['aa_entropy'], diffout['pep_entropy'] = self.calculate_entropy_prob(diffout['p_save'], reveal_mask, slmask)
         
         # Find winners
@@ -381,4 +381,3 @@ class Seq2SeqMDLM(Seq2Seq):
 
         return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
         return return_
-
