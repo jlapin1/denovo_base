@@ -921,16 +921,26 @@ class DenovoMDLMObj(BaseDenovo):
             )
         
         # Optimizer
-        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
-        
+
         # loading previous weights
         if config['prev_wts'] is not None:
             retain = False if config['load_last'] else True
             self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
             self.load_saved_weights(self.opt, "opt", config['load_last'])
-            U.optimizer_to(self.opt, device)
-        
+            U.optimizer_to(self.opt, device)        
+
+        if config['freeze_encoder']:
+            print(f"<DSCOMMENT> Freezing encoder weights")
+            for parameter in self.model.encoder.parameters():
+                parameter.requires_grad=False
+
+        if config['reinitialize_decoder']:
+            print(f"<DSCOMMENT> Re-initializing decoder weights")
+            self.model.initialize_decoder()
+
+        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+
         self.model.to(device)
 
         self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
@@ -1083,6 +1093,7 @@ if __name__ == '__main__':
             'lr_flat_steps', 'lr_floor', 'lr_decay_steps',
             'loader', 'log_wandb', 'eval_only', 'batch_size',
             'top_peaks', 'classifier_config', 'new_exp', 'inference',
+            'reinitialize_decoder','freeze_encoder',
         ]:
             if key == 'loader':
                 # These must be consistent with embedding layer in decoder

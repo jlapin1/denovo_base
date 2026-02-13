@@ -292,13 +292,12 @@ class Seq2SeqMDLM(Seq2Seq):
             encoder_config=encoder_config,
             top_peaks=top_peaks,
         )
+        self.token_dict = token_dict
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
-        self.decoder = MDLMDecoder(
-            token_dict          = token_dict,
-            decoder_config      = decoder_config,
-            **decoder_config,
-        )
+        self.decoder_config = decoder_config
+        self.initialize_decoder()
+
         # Diffusion object
         self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict, self.decoder)
         self.decoder.diff_obj = self.diff_obj
@@ -309,6 +308,13 @@ class Seq2SeqMDLM(Seq2Seq):
         if 'masses_path' in kwargs:
             self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
     
+    def initialize_decoder(self):
+        self.decoder = MDLMDecoder(
+            token_dict = self.token_dict,
+            decoder_config = self.decoder_config,
+            **self.decoder_config,
+        )
+
     def get_reveal_steps(self, x_in_time):
         trajectory_length = x_in_time.shape[1]
         reveal = ((x_in_time != self.decoder.MASK).int().argmax(1)-1).clip(min=0)
