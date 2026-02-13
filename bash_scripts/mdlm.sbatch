@@ -3,8 +3,8 @@
 # Adjust time/account as needed.
 #SBATCH -A Berzelius-2025-349
 #SBATCH -t 0-30:00:00
-#SBATCH --nodes=1
-#SBATCH --gpus-per-node=4
+#SBATCH --nodes=2
+#SBATCH --gpus-per-node=8
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --output=slurm_outs/mdlm-%j.out
@@ -27,7 +27,7 @@ export MASTER_ADDR MASTER_PORT NNODES GPUS_PER_NODE
 export NCCL_ASYNC_ERROR_HANDLING=1
 
 # Optional W&B run name
-export WANDB_NAME="mdlm_4gpu_custom_loss_${SLURM_JOB_ID}"
+export WANDB_NAME="mdlm_2n_8gpu_${SLURM_JOB_ID}"
 
 srun --ntasks=$NNODES --ntasks-per-node=1 --cpu-bind=none bash -c '
 torchrun \
@@ -37,5 +37,5 @@ torchrun \
   --rdzv_backend=c10d \
   --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
   main.py yaml/config_alfred_head.yaml \
-  decoder_mdlm.diffusion_config.custom_loss=true \
-  batch_size=512
+  decoder_mdlm.diffusion_config.custom_loss=false \
+  batch_size=512'
