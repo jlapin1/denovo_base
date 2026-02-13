@@ -545,7 +545,7 @@ class BaseDenovo:
         totsz = self.config['batch_size']*steps
         out['ce'] = float((out['ce'] / (totsz * self.config['sl'])).cpu().detach().numpy())
         for metric in tots['sum'].keys():
-            out[metric] = tots['sum'][metric] /  tots['total'][metric]
+            out[metric] = float(tots['sum'][metric] /  tots['total'][metric])
         
         self.on_eval_end()
         
