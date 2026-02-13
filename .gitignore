@@ -2,3 +2,4 @@
 save/*
 wandb/*
 slurm_outs/*
+.vscode/launch.json

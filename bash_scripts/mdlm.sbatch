@@ -7,6 +7,7 @@
 #SBATCH --gpus-per-node=8
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=16
+#SBATCH --mem=0
 #SBATCH --output=slurm_outs/mdlm-%j.out
 #SBATCH --error=slurm_outs/mdlm-%j.err
 

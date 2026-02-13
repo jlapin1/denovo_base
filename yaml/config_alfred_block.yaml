@@ -23,7 +23,7 @@ lr_decay_steps: 1000000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: #/cmnfs/proj/diffusion/experiments/2025-11-04_06-50-17 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -47,13 +47,12 @@ loader:
   masses_path: /proj/bedrock/datasets/9_species_V2
   dictionary_path: /proj/bedrock/datasets/9_species_V2/ns_dictionary.tsv
   synonyms:
-    #- [I, L]
+    - [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  num_workers: 2
-  val_batch_size: 100
-  reverse: False
+  num_workers: 4
+  reverse: True
   val_steps: 100
   disperse: False
   remove_columns:
@@ -172,6 +171,7 @@ decoder_diff:
     alphabet: False
     self_condition: True
     clamp_denoised: False
+    block_size: 5 # 5 for block training, empty for full seq
   # ensemble prediction
   ensemble:
     ensemble_n: 1
