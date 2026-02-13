@@ -52,6 +52,7 @@ loader:
     #- [E, Q+0.984]
   buffer_size: 1000
   num_workers: 4
+  val_batch_size: 100
   reverse: False
   val_steps: 100
   disperse: False

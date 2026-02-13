@@ -180,6 +180,8 @@ class LoaderHF(LoaderObj):
         pep_length: list=[0,40],
         reverse: bool=False,
         batch_size: int=100,
+        val_batch_size: int=None,
+        test_batch_size: int=None,
         num_workers: int=0,
         custom_columns: list=[],
         **kwargs
@@ -194,6 +196,8 @@ class LoaderHF(LoaderObj):
             masses_path = train_dataset_path
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
         max_seq = pep_length[1] if pep_length is not None else None
+        val_batch_size = batch_size if val_batch_size is None else val_batch_size
+        test_batch_size = val_batch_size if test_batch_size is None else test_batch_size
         
         ##############
         # Dictionary #
@@ -322,12 +326,12 @@ class LoaderHF(LoaderObj):
         if ('val_steps' in kwargs.keys()) and ('disperse' in kwargs.keys()):
             if kwargs['disperse'] and (kwargs['val_steps'] is not None):
                 print(f"<LOADCOMMENT> Dispersing validation set into {kwargs['val_steps']} batches")
-                every_n_ = self.val_size // batch_size // kwargs['val_steps']
+                every_n_ = self.val_size // val_batch_size // kwargs['val_steps']
                 if every_n_ > 2:
                     every_n_ -= 1 # minus 1 to be safe (charge and length filter make dataset shorter)
                 every_n = np.maximum(1, every_n_) 
                 dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
-                self.val_size = kwargs['val_steps'] * batch_size
+                self.val_size = kwargs['val_steps'] * val_batch_size
         
         # Shard dataset for distributed training (must occur before shuffle)
         world_size = utils.get_world_size()
@@ -363,8 +367,8 @@ class LoaderHF(LoaderObj):
         drop_last_train = utils.get_world_size() > 1
         self.dataloader = {
             'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn, drop_last=drop_last_train),
-            'val':   self.build_dataloader(dataset['val']  , batch_size, 0, eval_collate_function),
-            'test':  self.build_dataloader(dataset['test'] , batch_size, 0, eval_collate_function),
+            'val':   self.build_dataloader(dataset['val']  , val_batch_size, 0, eval_collate_function),
+            'test':  self.build_dataloader(dataset['test'] , test_batch_size, 0, eval_collate_function),
         }
 
 class LoaderCls(LoaderObj):
