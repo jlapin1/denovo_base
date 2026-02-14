@@ -125,8 +125,10 @@ class LoaderObj:
         return massdic
 
     def find_set_size_for_tqdm(self, dataset_path, include_name=None, exclude_name=None, regex='*sizes.tsv'):
-        ss_path = join(dataset_path, regex)
-        ss_path = glob(ss_path)[0]
+        ss_matches = glob(join(dataset_path, regex))
+        if len(ss_matches) == 0:
+            return float('inf')
+        ss_path = ss_matches[0]
         if os.path.exists(ss_path):
             split_sizes = pd.read_csv(ss_path, sep="\t", header=None, names=["name", "count"], index_col="name")
             
@@ -144,7 +146,7 @@ class LoaderObj:
 
         return size
 
-    def _load_dataset(self, dataset_path, include_name=None, exclude_name=None, ext=None, streaming=True):
+    def _load_dataset(self, dataset_path, include_name=None, exclude_name=None, ext=None, streaming=True, keep_in_memory=False):
         regex = "*" if include_name == None else f"*{include_name}*"
         if ext is not None:
             regex += ext
@@ -163,7 +165,8 @@ class LoaderObj:
         dataset = load_dataset(
             'parquet',
             data_files={'train': include_files},
-            streaming=streaming
+            streaming=streaming,
+            keep_in_memory=(keep_in_memory if not streaming else False),
         ).with_format('numpy')
 
         return dataset, include_files
@@ -202,6 +205,8 @@ class LoaderHF(LoaderObj):
         val_batch_size = batch_size if val_batch_size is None else val_batch_size
         test_batch_size = val_batch_size if test_batch_size is None else test_batch_size
         streaming = kwargs.get('streaming', True)
+        keep_in_memory = kwargs.get('keep_in_memory', False)
+        split_parquets = kwargs.get('split_parquets', False)
         
         ##############
         # Dictionary #
@@ -227,8 +232,15 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file that matches the regex *sizes.tsv in the train_dataset_path and val_dataset_path
         #   2. val_name will pick out 1 file's size from the val_dataset_path
-        self.train_size = self.find_set_size_for_tqdm(train_dataset_path, train_name, val_name, "*species*size*tsv")
-        self.val_size = self.find_set_size_for_tqdm(val_dataset_path, val_name, regex="*species*size*tsv")
+        if split_parquets:
+            train_fp = join(train_dataset_path, "train.parquet")
+            val_fp = join(val_dataset_path, "val.parquet")
+            test_fp = join(val_dataset_path, "test.parquet")
+            self.train_size = len(pd.read_parquet(train_fp, columns=[]))
+            self.val_size = len(pd.read_parquet(val_fp, columns=[]))
+        else:
+            self.train_size = self.find_set_size_for_tqdm(train_dataset_path, train_name, val_name, "*species*size*tsv")
+            self.val_size = self.find_set_size_for_tqdm(val_dataset_path, val_name, regex="*species*size*tsv")
         
         ###########
         # Dataset #
@@ -236,17 +248,29 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. The *_directory_path will contain its data in a directory named "parquet/processed"
         #   2. val_name only has to be somewhere in the filename -> *val_name*
-        dataset, train_files = self._load_dataset(
-            join(train_dataset_path, dpe), train_name, val_name, ext='parquet', streaming=streaming
-        )
-        dataset_val, val_files = self._load_dataset(
-            join(val_dataset_path, dpe), val_name, streaming=streaming
-        )
+        if split_parquets:
+            data_files = {'train': train_fp, 'val': val_fp}
+            if os.path.exists(test_fp):
+                data_files['test'] = test_fp
+            dataset = load_dataset(
+                'parquet',
+                data_files=data_files,
+                streaming=streaming,
+                keep_in_memory=(keep_in_memory if not streaming else False),
+            ).with_format('numpy')
+            train_files = [train_fp]
+            val_files = [val_fp]
+        else:
+            dataset, train_files = self._load_dataset(
+                join(train_dataset_path, dpe), train_name, val_name, ext='parquet', streaming=streaming, keep_in_memory=keep_in_memory
+            )
+            dataset_val, val_files = self._load_dataset(
+                join(val_dataset_path, dpe), val_name, streaming=streaming, keep_in_memory=keep_in_memory
+            )
+            dataset['val'] = dataset_val['train']
 
         print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
         print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
-        
-        dataset['val'] = dataset_val['train']
 
         # Optional debug subset to speed up iteration
         debug_subset = kwargs.get('debug_subset')

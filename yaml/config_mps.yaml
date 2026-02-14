@@ -40,19 +40,21 @@ wandb_project: diffusion_denovoMNIST
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: ./local_data/kingdoms_sacc_8k_compat
-  train_name: train
-  val_dataset_path: ./local_data/kingdoms_sacc_8k_compat
-  val_name: val
-  masses_path: ./local_data/kingdoms_sacc_8k_compat
-  dictionary_path: ./local_data/kingdoms_sacc_8k_compat/dictionary.tsv
-  tokenizer_path: ./local_data/kingdoms_sacc_8k_compat
+  train_dataset_path: /Users/alfred/Datasets/DeNovoMNIST/kingdoms_sacc_8k
+  train_name:
+  val_dataset_path: /Users/alfred/Datasets/DeNovoMNIST/kingdoms_sacc_8k
+  val_name:
+  masses_path: ./yaml/denovomnist_vocab
+  dictionary_path: ./yaml/denovomnist_vocab/dictionary.tsv
+  tokenizer_path: .
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
+  split_parquets: True
   streaming: False
+  keep_in_memory: True
   num_workers: 0
   val_batch_size: 16
   test_batch_size: 16
