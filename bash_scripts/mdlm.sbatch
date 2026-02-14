@@ -25,7 +25,7 @@ NNODES=${SLURM_NNODES}
 GPUS_PER_NODE=${SLURM_GPUS_ON_NODE}
 export MASTER_ADDR MASTER_PORT NNODES GPUS_PER_NODE
 
-export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 # Optional W&B run name
 export WANDB_NAME="mdlm_2n_8gpu_${SLURM_JOB_ID}"
@@ -38,5 +38,6 @@ torchrun \
   --rdzv_backend=c10d \
   --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
   main.py yaml/config_alfred_head.yaml \
+  loader.num_workers=0 \
   decoder_mdlm.diffusion_config.custom_loss=false \
   batch_size=512'

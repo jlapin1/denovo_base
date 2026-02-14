@@ -239,7 +239,7 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file that matches the regex *masses.tsv in the masses_path
         self.massdic = self.load_token_masses(masses_path)
-
+        
         ###############
         # Split sizes #
         ###############
@@ -414,9 +414,13 @@ class LoaderHF(LoaderObj):
                 self.val_size = int(np.ceil(self.val_size / world_size))
 
         # Shuffle the dataset
-        if 'buffer_size' in kwargs.keys():
+        train_buffer_size = kwargs.get('buffer_size')
+        if train_buffer_size is not None and world_size > 1:
+            # Keep per-rank iterable shuffle buffers bounded under distributed runs.
+            train_buffer_size = max(64, int(train_buffer_size) // world_size)
+        if train_buffer_size is not None:
             if isinstance(dataset['train'], IterableDataset):
-                dataset['train'] = dataset['train'].shuffle(buffer_size=kwargs['buffer_size'])
+                dataset['train'] = dataset['train'].shuffle(buffer_size=train_buffer_size)
             else:
                 dataset['train'] = dataset['train'].shuffle()
         else:

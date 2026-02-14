@@ -30,15 +30,36 @@ def init_distributed(backend=None):
     if world_size > 1 and not dist_is_initialized():
         if backend is None:
             backend = "nccl" if th.cuda.is_available() else "gloo"
-        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
         if th.cuda.is_available():
             th.cuda.set_device(local_rank)
+        init_kwargs = {
+            "backend": backend,
+            "rank": rank,
+            "world_size": world_size,
+        }
+        if th.cuda.is_available() and backend == "nccl":
+            # Newer torch accepts device_id; older versions do not.
+            try:
+                dist.init_process_group(**init_kwargs, device_id=local_rank)
+            except TypeError:
+                dist.init_process_group(**init_kwargs)
+        else:
+            dist.init_process_group(**init_kwargs)
     return {
         "distributed": dist_is_initialized(),
         "rank": get_rank(),
         "world_size": get_world_size(),
         "local_rank": local_rank,
     }
+
+
+def dist_barrier():
+    if not dist_is_initialized():
+        return
+    if th.cuda.is_available():
+        dist.barrier(device_ids=[th.cuda.current_device()])
+    else:
+        dist.barrier()
 
 def get_device():
     if th.cuda.is_available():

@@ -6,6 +6,7 @@ import torch as th
 import yaml
 import path
 from loader import LoaderHF
+from loader_lance import LoaderLance
 import numpy as np
 from models.encoder import Encoder
 from models.diff_classifier import Classifier
@@ -129,7 +130,9 @@ class BaseDenovo:
         else:
             self.val_steps = 100
         self.reverse = config['loader']['reverse']
-        self.data = LoaderHF(
+        use_lance_loader = self.config['loader'].get('use_lance', False)
+        loader_cls = LoaderLance if use_lance_loader else LoaderHF
+        self.data = loader_cls(
             top_pks=config['top_peaks'], 
             pep_length=None if (config['inference']&config['eval_only']) else config['pep_length'],
             batch_size=config['batch_size'],
@@ -299,14 +302,28 @@ class BaseDenovo:
                 if self.config['save_weights']:
                     self.save_last()
             if self.eval_frequency is not None and self.config['save_weights']:
-                if time()-self.eval_time > self.eval_frequency:
+                local_eval_due = (time() - self.eval_time) > self.eval_frequency
+                if self.distributed:
+                    # Synchronize the eval trigger across all ranks to avoid train/eval divergence.
+                    due_tensor = th.tensor(int(local_eval_due), device=device)
+                    due_tensor = U.all_reduce_tensor(due_tensor, op=th.distributed.ReduceOp.MAX)
+                    run_timed_eval = bool(due_tensor.item())
+                else:
+                    run_timed_eval = local_eval_due
+
+                if run_timed_eval:
+                    if self.distributed:
+                        U.dist_barrier()
                     out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
                     self.eval_out = out
                     new_score = out[self.config['high_score']]
                     if self.is_main:
                         self.checkpoint(new_score)
                     self.eval_time = time()
-                    if self.config['log_wandb'] and self.is_main: wandb.log(out)
+                    if self.config['log_wandb'] and self.is_main:
+                        wandb.log(out)
+                    if self.distributed:
+                        U.dist_barrier()
             
             step_end = time()
             
@@ -691,12 +708,16 @@ class BaseDenovo:
         for i in range(self.config['epochs']):
             
             # Train
-            if hasattr(self.data.dataset['train'], "set_epoch"):
+            if hasattr(self.data, "set_epoch"):
+                self.data.set_epoch(i)
+            elif hasattr(self.data.dataset['train'], "set_epoch"):
                 self.data.dataset['train'].set_epoch(i)
             self.train_epoch()
             self.on_train_epoch_end()
             
             # Eval
+            out = None
+            new_score = None
             if self.eval_frequency is None:
                 out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
                 new_score = out[self.config["high_score"]]
@@ -708,8 +729,18 @@ class BaseDenovo:
                     wandb.log(out)
                     out.pop('epoch')
             else:
-                out = self.eval_out if hasattr(self, 'eval_out') else self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)[0]
-                new_score = out[self.config["high_score"]]
+                # When time-triggered eval is enabled, do not run an extra epoch-end eval.
+                out = self.eval_out if hasattr(self, 'eval_out') else None
+                if out is not None:
+                    new_score = out[self.config["high_score"]]
+
+            if out is None:
+                line = "ValEpoch %d: skipped (waiting for time-triggered eval)" % i
+                line += " (%.1f s)"%(time()-start_time)
+                lines.append(line)
+                if self.is_main:
+                    print("\r"+line)
+                continue
             
             specifier = " ".join(len(out)*['%s'])
             write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
@@ -1233,7 +1264,7 @@ if __name__ == '__main__':
     device = U.get_device()
     is_main = U.is_main_process()
     if dist_info["distributed"] and th.distributed.is_initialized():
-        th.distributed.barrier()
+        U.dist_barrier()
     if overrides and is_main and created_paths:
         print(f"<DSCOMMENT> CLI overrides created new keys: {sorted(set(created_paths))}")
 
@@ -1284,7 +1315,7 @@ if __name__ == '__main__':
         svdir = './'
 
     if dist_info["distributed"] and th.distributed.is_initialized():
-        th.distributed.barrier()
+        U.dist_barrier()
 
     # Eval only. Must set before loader is created.
     if config['eval_only']:
