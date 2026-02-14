@@ -11,7 +11,7 @@ import numpy as np
 import math
 join = os.path.join
 
-def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
+def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False, row_idx=None):
     ab = example['intensity_array']
     ab_sort = (-ab).argsort()[:top]
     ab = ab[ab_sort]
@@ -37,10 +37,12 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
         example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
         example['peptide_length'] = peptide_length
     if 'name' in example: example['experiment_name'] = example['name'] # compat
+    if row_idx is not None:
+        example['row_idx'] = int(row_idx)
 
     return example
 
-def collate_fn(batch_list, custom_columns=[]):
+def collate_fn(batch_list, custom_columns=[], precomputed_encoder=None, split_name=None):
     out = {}
     out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
     out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
@@ -59,6 +61,16 @@ def collate_fn(batch_list, custom_columns=[]):
         out['hyperscore'] = th.tensor(np.stack([m['Hyperscore'] for m in batch_list]))
     for column in custom_columns:
         out[column] = np.array([m[column] for m in batch_list])
+    if (
+        precomputed_encoder is not None and
+        split_name is not None and
+        split_name in precomputed_encoder and
+        'row_idx' in batch_list[0]
+    ):
+        row_idx = np.array([m['row_idx'] for m in batch_list], dtype=np.int64)
+        split_store = precomputed_encoder[split_name]
+        out['enc_emb'] = th.tensor(split_store['emb'][row_idx], dtype=th.float32)
+        out['enc_mask'] = th.tensor(split_store['mask'][row_idx], dtype=th.bool)
 
     return out
 
@@ -207,6 +219,8 @@ class LoaderHF(LoaderObj):
         streaming = kwargs.get('streaming', True)
         keep_in_memory = kwargs.get('keep_in_memory', False)
         split_parquets = kwargs.get('split_parquets', False)
+        use_precomputed_encoder = kwargs.get('use_precomputed_encoder', False)
+        encoder_arrays_path = kwargs.get('encoder_arrays_path', train_dataset_path)
         
         ##############
         # Dictionary #
@@ -260,6 +274,18 @@ class LoaderHF(LoaderObj):
             ).with_format('numpy')
             train_files = [train_fp]
             val_files = [val_fp]
+            self.precomputed_encoder = None
+            if use_precomputed_encoder:
+                self.precomputed_encoder = {}
+                for split_name in ['train', 'val', 'test']:
+                    emb_fp = join(encoder_arrays_path, f'enc_embs_{split_name}.npy')
+                    mask_fp = join(encoder_arrays_path, f'enc_mask_{split_name}.npy')
+                    if os.path.exists(emb_fp) and os.path.exists(mask_fp):
+                        mmap_mode = None if keep_in_memory else 'r'
+                        self.precomputed_encoder[split_name] = {
+                            'emb': np.load(emb_fp, mmap_mode=mmap_mode),
+                            'mask': np.load(mask_fp, mmap_mode=mmap_mode),
+                        }
         else:
             dataset, train_files = self._load_dataset(
                 join(train_dataset_path, dpe), train_name, val_name, ext='parquet', streaming=streaming, keep_in_memory=keep_in_memory
@@ -268,6 +294,7 @@ class LoaderHF(LoaderObj):
                 join(val_dataset_path, dpe), val_name, streaming=streaming, keep_in_memory=keep_in_memory
             )
             dataset['val'] = dataset_val['train']
+            self.precomputed_encoder = None
 
         print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
         print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
@@ -300,13 +327,14 @@ class LoaderHF(LoaderObj):
         #########################
         # Map to format outputs #
         #########################
-        lambda_function = lambda example: map_fn(
+        lambda_function = lambda example, idx: map_fn(
             example,
             tokenizer=self.tokenizer,
             dic=self.amod_dic,
             top=top_pks, 
             max_seq=max_seq,
             reverse=reverse,
+            row_idx=idx if use_precomputed_encoder else None,
         )
         if 'remove_columns' in kwargs:
             remove_train_columns = [column for column in kwargs['remove_columns'] if column in dataset['train'].features]
@@ -317,10 +345,12 @@ class LoaderHF(LoaderObj):
         dataset['train'] = dataset['train'].map(
             lambda_function, 
             remove_columns=remove_train_columns,
+            with_indices=True,
         )
         dataset['val'] = dataset['val'].map(
             lambda_function,
             remove_columns=remove_val_columns,
+            with_indices=True,
         )
 
         ########################
@@ -400,12 +430,29 @@ class LoaderHF(LoaderObj):
         train_n_shards = getattr(self.dataset['train'], "n_shards", None)
         if train_n_shards is not None:
             num_workers = min(train_n_shards, num_workers)
-        eval_collate_function = lambda x: collate_fn(x, custom_columns=custom_columns)
+        train_collate_function = lambda x: collate_fn(
+            x,
+            custom_columns=[],
+            precomputed_encoder=self.precomputed_encoder,
+            split_name='train',
+        )
+        val_collate_function = lambda x: collate_fn(
+            x,
+            custom_columns=custom_columns,
+            precomputed_encoder=self.precomputed_encoder,
+            split_name='val',
+        )
+        test_collate_function = lambda x: collate_fn(
+            x,
+            custom_columns=custom_columns,
+            precomputed_encoder=self.precomputed_encoder,
+            split_name='test',
+        )
         drop_last_train = utils.get_world_size() > 1
         self.dataloader = {
-            'train': self.build_dataloader(dataset['train'], batch_size, num_workers, collate_fn, drop_last=drop_last_train),
-            'val':   self.build_dataloader(dataset['val']  , val_batch_size, 0, eval_collate_function),
-            'test':  self.build_dataloader(dataset['test'] , test_batch_size, 0, eval_collate_function),
+            'train': self.build_dataloader(dataset['train'], batch_size, num_workers, train_collate_function, drop_last=drop_last_train),
+            'val':   self.build_dataloader(dataset['val']  , val_batch_size, 0, val_collate_function),
+            'test':  self.build_dataloader(dataset['test'] , test_batch_size, 0, test_collate_function),
         }
 
 class LoaderCls(LoaderObj):

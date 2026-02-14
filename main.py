@@ -243,7 +243,10 @@ class BaseDenovo:
         running_loss = {key: deque(maxlen=20) for key in self.training_loss_keys}
         
         # Progress bar
-        train_steps = int(self.data.train_size // bs)
+        try:
+            train_steps = len(self.data.dataloader['train'])
+        except TypeError:
+            train_steps = int(self.data.train_size // bs)
         max_train_batches = self.config.get('max_train_batches')
         if max_train_batches is not None:
             train_steps = min(train_steps, int(max_train_batches))
@@ -544,10 +547,11 @@ class BaseDenovo:
         )
 
         # Progress bar
-        val_steps = min(
-            self.data.val_size // dataloader.batch_size,
-            max_batches,
-        )
+        try:
+            val_steps = len(dataloader)
+        except TypeError:
+            val_steps = self.data.val_size // dataloader.batch_size
+        val_steps = min(val_steps, max_batches)
         pbar = tqdm(dataloader, total=val_steps, leave=False, disable=(not self.is_main))
         pbar.set_description(f"Evaluation")
         model = self.get_model()
@@ -764,6 +768,9 @@ class DenovoArDSObj(BaseDenovo):
             decoder_config = config['decoder_ar'],
             token_dict     = self.data.amod_dic,
             top_peaks      = config['top_peaks'],
+            use_precomputed_encoder=config['loader'].get('use_precomputed_encoder', False),
+            precomputed_encoder_dim=config['loader'].get('precomputed_encoder_dim'),
+            precomputed_kv_indim=config['loader'].get('precomputed_kv_indim'),
         )
         
         print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
@@ -869,6 +876,9 @@ class DenovoDiffusionObj(BaseDenovo):
             max_peptide_length = config['pep_length'][1], 
             token_dict = self.data.amod_dic,
             masses_path = config['loader']['masses_path'],
+            use_precomputed_encoder=config['loader'].get('use_precomputed_encoder', False),
+            precomputed_encoder_dim=config['loader'].get('precomputed_encoder_dim'),
+            precomputed_kv_indim=config['loader'].get('precomputed_kv_indim'),
         )
 
         print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
@@ -1058,6 +1068,9 @@ class DenovoMDLMObj(BaseDenovo):
             token_dict = self.data.amod_dic,
             ensemble_config   = config['decoder_diff']['ensemble'],
             masses_path = config['loader']['masses_path'],
+            use_precomputed_encoder=config['loader'].get('use_precomputed_encoder', False),
+            precomputed_encoder_dim=config['loader'].get('precomputed_encoder_dim'),
+            precomputed_kv_indim=config['loader'].get('precomputed_kv_indim'),
         )
         self.initialize_token_loss()
         
@@ -1065,12 +1078,13 @@ class DenovoMDLMObj(BaseDenovo):
         import models.mdlm.ema as ema
         import itertools
         if diff_config['training']['ema'] > 0:
+            ema_param_groups = [self.model.decoder.parameters(), self.model.diff_obj.noise.parameters()]
+            if getattr(self.model, "encoder", None) is not None:
+                ema_param_groups.insert(0, self.model.encoder.parameters())
+            if getattr(self.model, "precomputed_proj", None) is not None:
+                ema_param_groups.append(self.model.precomputed_proj.parameters())
             self.ema = ema.ExponentialMovingAverage(
-                itertools.chain(
-                    self.model.encoder.parameters(),
-                    self.model.decoder.parameters(),
-                    self.model.diff_obj.noise.parameters(),
-                ),
+                itertools.chain(*ema_param_groups),
                 decay=diff_config['training']['ema']
             )
         

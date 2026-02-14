@@ -101,12 +101,34 @@ class Seq2Seq(nn.Module):
     ):
         super(Seq2Seq, self).__init__()
         self.encoder_dict = encoder_config
+        self.use_precomputed_encoder = kwargs.get('use_precomputed_encoder', False)
+        self.precomputed_encoder_dim = kwargs.get('precomputed_encoder_dim', None)
+        self.precomputed_kv_indim = kwargs.get('precomputed_kv_indim', None)
+        self.encoder = None
+        if not self.use_precomputed_encoder:
+            self.encoder = Encoder(
+                sequence_length=top_peaks,
+                device=device,
+                **encoder_config,
+            )
+        self.precomputed_proj = None
 
-        self.encoder = Encoder(
-            sequence_length=top_peaks,
-            device=device,
-            **encoder_config,
-        )
+    def configure_precomputed_encoder(self, target_kv_indim):
+        self.precomputed_kv_indim = int(target_kv_indim)
+        if not self.use_precomputed_encoder:
+            self.precomputed_proj = None
+            return
+        if self.precomputed_encoder_dim is None:
+            self.precomputed_proj = None
+            return
+        if int(self.precomputed_encoder_dim) != int(self.precomputed_kv_indim):
+            self.precomputed_proj = nn.Linear(
+                int(self.precomputed_encoder_dim),
+                int(self.precomputed_kv_indim),
+                bias=False,
+            )
+        else:
+            self.precomputed_proj = None
     
     def total_params(self):
         return sum([m.numel() for m in self.parameters() if m.requires_grad])
@@ -117,6 +139,8 @@ class Seq2Seq(nn.Module):
         mask_length=True, 
         return_mask=False, 
     ):
+        if self.encoder is None:
+            raise RuntimeError("encinp() called without an initialized encoder.")
 
         mzab = th.cat([batch['mz'][...,None], batch['ab'][...,None]], -1)
         model_inp = {
@@ -134,6 +158,25 @@ class Seq2Seq(nn.Module):
         return model_inp       
     
     def encoder_embedding(self, batch):
+        if self.use_precomputed_encoder:
+            if 'enc_emb' not in batch:
+                raise KeyError("Expected 'enc_emb' in batch when use_precomputed_encoder=True")
+            emb = batch['enc_emb']
+            if self.precomputed_proj is not None:
+                emb = self.precomputed_proj(emb)
+            elif emb.shape[-1] != self.precomputed_kv_indim:
+                raise RuntimeError(
+                    f"enc_emb dim {emb.shape[-1]} does not match precomputed_kv_indim {self.precomputed_kv_indim}"
+                )
+            mask = batch.get('enc_mask', None)
+            if mask is not None:
+                if mask.dtype == th.bool:
+                    mask = mask.type(th.float32) * 1e7
+                else:
+                    mask = mask.type(th.float32)
+                    if float(mask.max().detach().cpu().item()) <= 1.0:
+                        mask = mask * 1e7
+            return {'emb': emb, 'mask': mask, 'other': None}
         encoder_input = self.encinp(batch)
         embedding = self.encoder(**encoder_input)
         return embedding
@@ -156,8 +199,13 @@ class Seq2SeqAR(Seq2Seq):
         super().__init__(
             encoder_config=encoder_config,
             top_peaks=top_peaks,
+            **kwargs,
         )
-        decoder_config['kv_indim'] = self.encoder.run_units
+        if self.use_precomputed_encoder:
+            raise NotImplementedError("Seq2SeqAR does not support use_precomputed_encoder=True.")
+        decoder_kv_indim = decoder_config.get('kv_indim', self.encoder.run_units)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
         self.decoder = DenovoDecoder(
             token_dict=token_dict, 
             dec_config=decoder_config, 
@@ -194,8 +242,14 @@ class Seq2SeqDiff(Seq2Seq):
         super().__init__(
             encoder_config=encoder_config,
             top_peaks=top_peaks,
+            **kwargs,
         )
-        decoder_config['kv_indim'] = self.encoder.run_units
+        default_kv_indim = encoder_config.get('running_units')
+        if self.encoder is not None:
+            default_kv_indim = self.encoder.run_units
+        decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
         self.diff_obj = create_diffusion(**diff_config)
         self.decoder = DenovoDiffusionDecoder(
             input_output_units = diff_config['in_channel'], # perhaps replace this with running units
@@ -291,9 +345,15 @@ class Seq2SeqMDLM(Seq2Seq):
         super().__init__(
             encoder_config=encoder_config,
             top_peaks=top_peaks,
+            **kwargs,
         )
         # Decoder model
-        decoder_config['kv_indim'] = self.encoder.run_units
+        default_kv_indim = encoder_config.get('running_units')
+        if self.encoder is not None:
+            default_kv_indim = self.encoder.run_units
+        decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,
