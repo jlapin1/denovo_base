@@ -533,12 +533,22 @@ class BaseDenovo:
         token_count = th.tensor(0.0, device=device)
         tots = {'sum':{}, 'total': {}}
 
+        # Build a fresh eval dataloader each call to avoid iterator exhaustion
+        # across epochs when using streaming datasets.
+        base_loader = self.data.dataloader[dset]
+        dataloader = self.data.build_dataloader(
+            self.data.dataset[dset],
+            base_loader.batch_size,
+            0,
+            base_loader.collate_fn,
+        )
+
         # Progress bar
         val_steps = min(
-            self.data.val_size // self.data.dataloader[dset].batch_size,
+            self.data.val_size // dataloader.batch_size,
             max_batches,
         )
-        pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=False, disable=(not self.is_main))
+        pbar = tqdm(dataloader, total=val_steps, leave=False, disable=(not self.is_main))
         pbar.set_description(f"Evaluation")
         model = self.get_model()
         model.eval()
@@ -677,7 +687,8 @@ class BaseDenovo:
         for i in range(self.config['epochs']):
             
             # Train
-            self.data.dataset['train'].set_epoch(i)
+            if hasattr(self.data.dataset['train'], "set_epoch"):
+                self.data.dataset['train'].set_epoch(i)
             self.train_epoch()
             self.on_train_epoch_end()
             

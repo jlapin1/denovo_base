@@ -144,7 +144,7 @@ class LoaderObj:
 
         return size
 
-    def _load_dataset(self, dataset_path, include_name=None, exclude_name=None, ext=None):
+    def _load_dataset(self, dataset_path, include_name=None, exclude_name=None, ext=None, streaming=True):
         regex = "*" if include_name == None else f"*{include_name}*"
         if ext is not None:
             regex += ext
@@ -163,7 +163,7 @@ class LoaderObj:
         dataset = load_dataset(
             'parquet',
             data_files={'train': include_files},
-            streaming=True
+            streaming=streaming
         ).with_format('numpy')
 
         return dataset, include_files
@@ -201,6 +201,7 @@ class LoaderHF(LoaderObj):
         max_seq = pep_length[1] if pep_length is not None else None
         val_batch_size = batch_size if val_batch_size is None else val_batch_size
         test_batch_size = val_batch_size if test_batch_size is None else test_batch_size
+        streaming = kwargs.get('streaming', True)
         
         ##############
         # Dictionary #
@@ -235,8 +236,12 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. The *_directory_path will contain its data in a directory named "parquet/processed"
         #   2. val_name only has to be somewhere in the filename -> *val_name*
-        dataset, train_files = self._load_dataset(join(train_dataset_path, dpe), train_name, val_name, ext='parquet')
-        dataset_val, val_files = self._load_dataset(join(val_dataset_path, dpe), val_name)
+        dataset, train_files = self._load_dataset(
+            join(train_dataset_path, dpe), train_name, val_name, ext='parquet', streaming=streaming
+        )
+        dataset_val, val_files = self._load_dataset(
+            join(val_dataset_path, dpe), val_name, streaming=streaming
+        )
 
         print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
         print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
@@ -259,6 +264,14 @@ class LoaderHF(LoaderObj):
                 self.train_size = min(self.train_size, int(debug_subset))
             if self.val_size not in [None, float('inf')]:
                 self.val_size = min(self.val_size, int(debug_subset))
+
+        #############
+        # Tokenizer #
+        #############
+        # - RULES
+        #   1. There is a file named enumerate_tokens.py with a subroutine named
+        #      partition_modified_sequence
+        self.tokenizer = self.create_tokenizer(tokenizer_path)
 
         #########################
         # Map to format outputs #
@@ -294,14 +307,6 @@ class LoaderHF(LoaderObj):
         elif test_split_method == 'every_other':
             dataset['val'] = dataset['val'].filter(lambda example, idx: idx % every_n == 0, with_indices=True)
             dataset['test'] = dataset['test'].filter(lambda example, idx: idx % every_n == 1, with_indices=True)
-        
-        #############
-        # Tokenizer #
-        #############
-        # - RULES
-        #   1. There is a file named enumerate_tokens.py with a subroutine named
-        #      partition_modified_sequence
-        self.tokenizer = self.create_tokenizer(tokenizer_path)
         
         #############
         # Filtering #
@@ -356,7 +361,10 @@ class LoaderHF(LoaderObj):
 
         # Shuffle the dataset
         if 'buffer_size' in kwargs.keys():
-            dataset['train'] = dataset['train'].shuffle(buffer_size=kwargs['buffer_size'])
+            if isinstance(dataset['train'], IterableDataset):
+                dataset['train'] = dataset['train'].shuffle(buffer_size=kwargs['buffer_size'])
+            else:
+                dataset['train'] = dataset['train'].shuffle()
         else:
             dataset['train'] = dataset['train'].shuffle()
         
@@ -365,7 +373,9 @@ class LoaderHF(LoaderObj):
         ###############
         # Dataloaders #
         ###############
-        num_workers = min(self.dataset['train'].n_shards, num_workers)
+        train_n_shards = getattr(self.dataset['train'], "n_shards", None)
+        if train_n_shards is not None:
+            num_workers = min(train_n_shards, num_workers)
         eval_collate_function = lambda x: collate_fn(x, custom_columns=custom_columns)
         drop_last_train = utils.get_world_size() > 1
         self.dataloader = {
