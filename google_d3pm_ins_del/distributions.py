@@ -22,7 +22,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from d3pm.insertdelete import math_util
+from . import math_util
 
 NDArray = Any
 

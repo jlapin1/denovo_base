@@ -21,7 +21,7 @@ import flax.struct
 import jax
 import jax.numpy as jnp
 
-from d3pm.insertdelete import math_util
+from . import math_util
 
 NDArray = Any
 

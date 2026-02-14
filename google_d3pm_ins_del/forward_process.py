@@ -79,11 +79,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from d3pm.insertdelete import distributions
-from d3pm.insertdelete import dynamic_programs
-from d3pm.insertdelete import math_util
-from d3pm.insertdelete import transition_operator
-from d3pm.insertdelete import util
+from . import distributions
+from . import dynamic_programs
+from . import math_util
+from . import transition_operator
+from . import util
 
 PyTree = Any
 NDArray = Any

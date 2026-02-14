@@ -25,12 +25,12 @@ import jax.numpy as jnp
 import numpy as np
 import scipy
 
-from d3pm.insertdelete import forward_process
-from d3pm.insertdelete import math_util
-from d3pm.insertdelete import schedules
-from d3pm.insertdelete import transition_operator
-from d3pm.insertdelete import util
-from d3pm.text import types
+from . import forward_process
+from . import math_util
+from . import schedules
+from . import transition_operator
+from . import util
+from .text import types
 
 NDArray = Any
 PRNGKey = NDArray

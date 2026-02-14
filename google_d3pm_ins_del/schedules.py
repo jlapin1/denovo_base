@@ -22,8 +22,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from d3pm.insertdelete import forward_process
-from d3pm.insertdelete import transition_operator
+from . import forward_process
+from . import transition_operator
 
 NDArray = Any
 
