@@ -122,7 +122,10 @@ class BaseDenovo:
         # Dataloader
         if 'val_steps' in self.config['loader'].keys(): # backwards compatibility
             val_steps = self.config['loader']['val_steps']
-            self.val_steps = 1 if val_steps == None else val_steps # backwards compatiblity
+            if val_steps == -1:
+                self.val_steps = float('inf')
+            else:
+                self.val_steps = 1 if val_steps == None else val_steps # backwards compatiblity
         else:
             self.val_steps = 100
         self.reverse = config['loader']['reverse']

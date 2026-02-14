@@ -45,6 +45,8 @@ def get_device():
         if dist_is_initialized():
             return th.device("cuda", th.cuda.current_device())
         return th.device("cuda")
+    if hasattr(th.backends, "mps") and th.backends.mps.is_available():
+        return th.device("mps")
     return th.device("cpu")
 
 def all_reduce_tensor(tensor, op=dist.ReduceOp.SUM):

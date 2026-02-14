@@ -106,8 +106,11 @@ class LoaderObj:
         #   1. There is a file named enumerate_tokens.py with a subroutine named
         #      partition_modified_sequence
         sys.path.insert(0, tokenizer_path)
-        from enumerate_tokens import partition_modified_sequence
-        tokenizer = partition_modified_sequence
+        try:
+            from enumerate_tokens import partition_modified_sequence
+            tokenizer = partition_modified_sequence
+        except ImportError:
+            tokenizer = utils.partition_modified_sequence
 
         return tokenizer
 

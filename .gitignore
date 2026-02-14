@@ -3,3 +3,5 @@ save/*
 wandb/*
 slurm_outs/*
 .vscode/launch.json
+.cache/
+local_data/

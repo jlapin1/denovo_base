@@ -1,0 +1,220 @@
+eval_only: False
+inference: False
+batch_size: 16
+top_peaks: 100
+pep_length: [0, 14]
+epochs: 20
+
+#################
+# Learning rate #
+#################
+lr_schedule: True
+# Phase 1 - Warmup
+lr_warmup_start: 1.0e-6
+lr_warmup_end: 1.0e-4 # phase 2 LR
+lr_warmup_steps: 20000 #20000
+# Phase 2 - Flat
+lr_flat_steps: 266000 #266000
+# Phase 3 - Decay
+lr_floor: 1.0e-5
+lr_decay_steps: 1000000 # 1000000
+
+############################
+# Loading, logging, saving #
+############################
+# Loading previous weights
+prev_wts: #/cmnfs/proj/diffusion/experiments/2025-11-04_06-50-17 # Load weights from previous run (project path->timestamp)
+load_last: False
+new_exp: False # continue using old directory (if pev_wts) or create new one
+# Saving weights
+save_weights: False
+high_score: aa_recall
+save_last_freq: 10000
+eval_frequency:
+# Logging
+log_wandb: True
+wandb_entity: kall
+wandb_project: diffusion_denovoMNIST
+
+##################################
+# Dataset and dataloader options #
+##################################
+loader:
+  train_dataset_path: ./local_data/kingdoms_sacc_8k_compat
+  train_name: train
+  val_dataset_path: ./local_data/kingdoms_sacc_8k_compat
+  val_name: val
+  masses_path: ./local_data/kingdoms_sacc_8k_compat
+  dictionary_path: ./local_data/kingdoms_sacc_8k_compat/dictionary.tsv
+  tokenizer_path: ./local_data/kingdoms_sacc_8k_compat
+  synonyms:
+    #- [I, L]
+    #- [D, N+0.984]
+    #- [E, Q+0.984]
+  buffer_size: 1000
+  num_workers: 0
+  val_batch_size: 16
+  test_batch_size: 16
+  reverse: False
+  val_steps: -1
+  disperse: False
+  remove_columns:
+    - 'scan_number'
+    - 'sequence'
+    - 'precursor_mz'
+    - 'retention_time'
+  scratch:
+    use: False
+    path: /media/storage/scratch/ninespecies/
+
+##########
+# Models #
+##########
+encoder_name: mine # depthcharge | {other}
+decoder_name: mdlm # *diff* | *mdlm* | *
+
+# Encoder model
+
+encoder_dict:
+  norm_type: 'layer'
+  mz_units: 256
+  ab_units: 64
+  subdivide: False
+  running_units: 128
+  att_d: 32
+  att_h: 4
+  gate: False
+  alphabet: False
+  depth: 4
+  ffn_multiplier: 1
+  prenorm: True
+  prec_type: inject_pre
+  use_charge: False
+  use_mass: False
+  bias: # 'pairwise' | 'regular' | False | None
+  dropout: 0.25
+  recycling_its: 1
+  pw_mz_units: 128
+  pw_run_units: 32
+  pw_attention_ch: 16
+  pw_attention_h: 2
+  pw_n: 2
+  pw_blocks: 0
+
+# Decoder model
+
+decoder_ar:
+  running_units: 768
+  max_sequence_length: 100
+  depth: 9
+  d: 64
+  h: 12
+  ffn_multiplier: 2
+  ce_units: 256
+  use_charge: True
+  use_energy: False
+  use_mass: True
+  prec_type: 'inject_pre' # inject_pre | inject_ffn | inject_norm | pretoken | posttoken | None
+  norm_type: 'layer'
+  prenorm: True
+  preembed: True
+  penultimate_units:
+  pool: False
+  dropout: 0.25
+  alphabet: False
+
+decoder_diff:
+  diffusion_config:
+    sequence_len: 15
+    learn_sigma: False
+    sigma_small: False
+    sigma_weight: 1.0 # vlb_weight
+    class_cond: False
+    diffusion_steps: 200
+    noise_schedule: mine
+    noise_exponent: 0.2
+    timestep_respacing: ""
+    use_kl: False
+    predict_xstart: True # epsilon if False
+    clip_denoised: False
+    rescale_timesteps: True
+    rescale_learned_sigmas: True
+    use_checkpoint: False
+    model_arch: transformer
+    in_channel: 128
+    out_channel: 128
+    logits_mode: 1
+    training_mode: diffusion-lm
+    init_pretrained: False
+    freeze_embeddings: False
+    use_pretrained_embeddings: True
+    load_ckpt:
+    loss_update_granu: 20
+    schedule_update_stride: 2000000
+    use_loss_mask: False
+  model_config:
+    running_units: 128
+    sequence_length: 15
+    depth: 4
+    d: 32
+    h: 4
+    ffn_multiplier: 1
+    timestep_dimension: 64
+    precursor_dimension: 64
+    use_charge: True
+    use_mass: True
+    use_leftover: False
+    use_energy: False
+    prec_type: None
+    norm_type: 'layer'
+    prenorm: True
+    preembed: True
+    penultimate_units:
+    dropout: 0.25
+    alphabet: False
+    self_condition: True
+    clamp_denoised: False
+  # ensemble prediction
+  ensemble:
+    ensemble_n: 1
+    mass_tol: 1e-2
+decoder_mdlm:
+  diffusion_config:
+    T: 0
+    subs_masking: False
+    parameterization: subs
+    time_conditioning: True
+    sampling:
+      predictor: ddpm_cache
+      steps: 4
+      sampler: linear # linear | cosine | sigmoid | cube
+      sigmoid_zero_value: 0.00247
+      top: 1
+      min_prob: 0.
+      max_prob: 1.
+      noise_removal: True
+      semi_ar: False
+      stride_length: 1
+      num_strides: 1
+    eval:
+    training:
+      ema: 0.9999
+      antithetic_sampling: True
+      importance_sampling: False
+      sampling_eps: 1.0e-3
+      change_of_variables: False
+    noise:
+      type: loglinear
+    model:
+      length: 15
+      self_condition: True
+
+############################
+# Classifier for diffusion #
+############################
+# Leaving ckpt empty deactivate classifier guided diffusion
+classifier_config:
+  ckpt: #/cmnfs/proj/diffusion/experiments/2025-08-01_00-24-55/enzyme_classifier/weights/model_epoch=14_ce=1.2132122764480224.wts
+  num_output_classes: 5
+  class_index: 4
+  scale: 1000
