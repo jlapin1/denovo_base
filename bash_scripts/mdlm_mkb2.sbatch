@@ -2,7 +2,7 @@
 # MDLM Lance training on MKB2 (2 nodes, 8 GPUs per node).
 # Uses local scratch staging + Lance map-style loader.
 #SBATCH -A Berzelius-2025-349
-#SBATCH -t 0-72:00:00
+#SBATCH -t 0-10:00:00
 #SBATCH --nodes=2
 #SBATCH --gpus-per-node=8
 #SBATCH --tasks-per-node=1
@@ -65,4 +65,6 @@ $TORCHRUN \
   loader.num_workers=2 \
   loader.val_num_workers=2 \
   decoder_mdlm.diffusion_config.custom_loss=false \
+  eval_frequency=900 \
+  loader.val_steps=2 \
   batch_size=512'
