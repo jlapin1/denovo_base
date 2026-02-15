@@ -94,10 +94,24 @@ def reduce_dict(input_dict, average=True, device=None):
         reduced[k] = t
     return reduced
 
-def timestamp():
-    dt = str(datetime.datetime.now()).split()
-    dt[-1] = re.sub(':', '-', dt[-1]).split('.')[0]
-    return "_".join(dt)
+def timestamp(include_microseconds=True):
+    fmt = "%Y-%m-%d_%H-%M-%S-%f" if include_microseconds else "%Y-%m-%d_%H-%M-%S"
+    return datetime.datetime.now().strftime(fmt)
+
+
+def unique_experiment_dir(root_dir, run_name=None):
+    if run_name is None:
+        run_name = timestamp(include_microseconds=True)
+    root_dir = str(root_dir)
+    candidate = os.path.join(root_dir, run_name)
+    if not os.path.exists(candidate):
+        return candidate
+    idx = 1
+    while True:
+        suffixed = f"{candidate}_{idx}"
+        if not os.path.exists(suffixed):
+            return suffixed
+        idx += 1
 
 def create_experiment(directory, svwts=False):
     os.mkdir(directory)

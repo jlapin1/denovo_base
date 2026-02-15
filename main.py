@@ -157,32 +157,52 @@ class BaseDenovo:
         th.save(model.state_dict(), fp)
     
     def save_last(self, override=False):
-        if not self.is_main:
-            return
         ready = self.global_step - self.save_last_counter >= self.config['save_last_freq']
-        if ready or override:
+        should_save = bool(ready or override)
+        if not should_save:
+            return
+        if self.distributed:
+            # Ensure all ranks reached the same training step before rank-0 writes.
+            U.dist_barrier()
+        if self.is_main:
             self.save_weights(os.path.join(self.svdir, 'weights/model_last.wts'))
             U.save_optimizer_state(self.opt, os.path.join(self.svdir, 'weights/opt_last.wts'))
-            self.save_last_counter = self.global_step
+        self.save_last_counter = self.global_step
+        if self.distributed:
+            U.dist_barrier()
     
     def checkpoint(self, score):
-        if not self.is_main:
-            return
         self.save_last(override=True)
-        if score > self.high_score:
+        if self.distributed:
+            U.dist_barrier()
+        if self.is_main and score > self.high_score:
             self.high_score = score
             ext = f"step{self.global_step}_high_{self.high_score:.3f}"
             wtsdir = os.path.join(self.svdir, "weights")
             for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
             self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
+        if self.distributed:
+            U.dist_barrier()
 
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
-        print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
+        if self.is_main:
+            print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
         possible_weights_path = glob(os.path.join(self.rddir, "weights", regex))
+        found_local = len(possible_weights_path) > 0
+        if self.distributed:
+            # Use SUM for broad NCCL compatibility; MIN/MAX on integer tensors can be backend-sensitive.
+            found_tensor = th.tensor(float(found_local), device=device)
+            found_sum = float(U.all_reduce_tensor(found_tensor, op=th.distributed.ReduceOp.SUM).item())
+            if 0.0 < found_sum < float(self.world_size):
+                raise RuntimeError(
+                    f"Inconsistent checkpoint visibility across ranks for {weights_type}: "
+                    f"rank{self.rank} found={found_local} path={self.rddir}"
+                )
+            found_local = found_sum > 0.0
         
         # Found something
-        if len(possible_weights_path) > 0:
+        if found_local:
             
             # Found only 1 matching file
             if len(possible_weights_path) == 1:
@@ -195,12 +215,19 @@ class BaseDenovo:
                     weights_path = [m for m in possible_weights_path if 'high' in m][0]
                     qualifier = '"high"'
                 except:
-                    weights_path = [m for m in glob(possible_weights_path) if 'last' in m][0]
-                    qualifier = '"last"'
+                    last_matches = [m for m in possible_weights_path if 'last' in m]
+                    if len(last_matches) > 0:
+                        weights_path = last_matches[0]
+                        qualifier = '"last"'
+                    else:
+                        weights_path = sorted(possible_weights_path)[-1]
+                        qualifier = "latest-sorted"
             
-            print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
+            if self.is_main:
+                print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
             target = obj.module if isinstance(obj, DDP) else obj
-            target.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
+            # Load checkpoints on CPU first to avoid GPU-side load spikes on distributed startup.
+            target.load_state_dict(th.load(weights_path, map_location='cpu', weights_only=False))
 
             if retain:
                 try:
@@ -210,7 +237,8 @@ class BaseDenovo:
         
         # Found nothing
         else:
-            print(f"Found no weights fitting regular expression")
+            if self.is_main:
+                print(f"Found no weights fitting regular expression")
 
     def split_labels_str(self, incl_str):
         return [label for label in self.dl.labels if incl_str in label]
@@ -299,8 +327,8 @@ class BaseDenovo:
                 if self.log and (self.global_step % svfreq == 0):
                     self.savetxt(self.running_loss)
                     self.running_loss = []
-                if self.config['save_weights']:
-                    self.save_last()
+            if self.config['save_weights']:
+                self.save_last()
             if self.eval_frequency is not None and self.config['save_weights']:
                 local_eval_due = (time() - self.eval_time) > self.eval_frequency
                 if self.distributed:
@@ -317,8 +345,7 @@ class BaseDenovo:
                     out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
                     self.eval_out = out
                     new_score = out[self.config['high_score']]
-                    if self.is_main:
-                        self.checkpoint(new_score)
+                    self.checkpoint(new_score)
                     self.eval_time = time()
                     if self.config['log_wandb'] and self.is_main:
                         wandb.log(out)
@@ -721,7 +748,8 @@ class BaseDenovo:
             if self.eval_frequency is None:
                 out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
                 new_score = out[self.config["high_score"]]
-                if self.config['save_weights'] and self.is_main: self.checkpoint(new_score)
+                if self.config['save_weights']:
+                    self.checkpoint(new_score)
             
                 # Logging
                 if self.config['log_wandb'] and self.is_main:
@@ -1273,11 +1301,19 @@ if __name__ == '__main__':
     ########################################################
 
     # Continuing previous downstream run
-    timestamp = U.timestamp()
+    timestamp = U.timestamp(include_microseconds=True)
+    checkpoint_root = config.get('checkpoint_root', 'save')
+    if checkpoint_root in [None, '']:
+        checkpoint_root = 'save'
     if config['prev_wts'] is not None:
         rddir = os.path.join(config['prev_wts'])
         if config['new_exp']:
-            svdir = os.path.join('save', timestamp)
+            svdir = U.unique_experiment_dir(checkpoint_root, timestamp) if is_main else None
+            if dist_info["distributed"] and th.distributed.is_initialized():
+                svdir_obj = [svdir]
+                th.distributed.broadcast_object_list(svdir_obj, src=0)
+                svdir = svdir_obj[0]
+            timestamp = os.path.basename(svdir)
             if not config['eval_only'] and is_main:
                 U.create_experiment(svdir, svwts=config['save_weights'])
                 print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
@@ -1306,7 +1342,12 @@ if __name__ == '__main__':
     # Create new experiment
     elif config['save_weights'] and not config['eval_only']:
         rddir = None
-        svdir = os.path.join('save', timestamp)
+        svdir = U.unique_experiment_dir(checkpoint_root, timestamp) if is_main else None
+        if dist_info["distributed"] and th.distributed.is_initialized():
+            svdir_obj = [svdir]
+            th.distributed.broadcast_object_list(svdir_obj, src=0)
+            svdir = svdir_obj[0]
+        timestamp = os.path.basename(svdir)
         if is_main:
             U.create_experiment(svdir, svwts=config['save_weights'])
             print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
@@ -1357,59 +1398,70 @@ if __name__ == '__main__':
     # Run training and/or evaluation #
     ##################################
 
-    if config['eval_only']:
-        evc = evconfig['eval_only']
-        
-        # Apply settings that are independent of training
-        max_batches = int(eval(str(evc['val_steps'] if evc['val_steps'] is not None else 9e10)))
-        if 'max_batches' in evc.keys(): max_batches = evc['max_batches'] # override val steps
-        if config['decoder_name'] in ['diff', 'mdlm']:
-            if evc['clamp_denoised'] is not None:
-                D.model.decoder.clamp_denoised = evc['clamp_denoised']
-            if evc['n'] is not None:
-                D.model.ens_size = evc['n']
-                D.eval_kwargs['n'] = D.model.ens_size
-        
-        # Turn gradients off for de novo model
-        for parm in D.model.parameters(): parm.requires_grad=False
-        
-        # Classifier guidance
-        no_grad = False if hasattr(D, 'classifier') else True
+    try:
+        if config['eval_only']:
+            evc = evconfig['eval_only']
+            
+            # Apply settings that are independent of training
+            max_batches = int(eval(str(evc['val_steps'] if evc['val_steps'] is not None else 9e10)))
+            if 'max_batches' in evc.keys(): max_batches = evc['max_batches'] # override val steps
+            if config['decoder_name'] in ['diff', 'mdlm']:
+                if evc['clamp_denoised'] is not None:
+                    D.model.decoder.clamp_denoised = evc['clamp_denoised']
+                if evc['n'] is not None:
+                    D.model.ens_size = evc['n']
+                    D.eval_kwargs['n'] = D.model.ens_size
+            
+            # Turn gradients off for de novo model
+            for parm in D.model.parameters(): parm.requires_grad=False
+            
+            # Classifier guidance
+            no_grad = False if hasattr(D, 'classifier') else True
 
-        # Run evaluation
-        evalkwargs = dict(evc['eval_kwargs']) if evc['eval_kwargs'] is not None else {}
-        if config['inference']:
-            D.inference(
-                output_filename=evc['outpath'],
-                dset=evc['set'],
-                max_batches=max_batches,
-                stream_write=evc['stream'],
-                no_grad=no_grad,
-                kwargs=D.eval_kwargs|evalkwargs,
-                save_keys=evconfig['inference_save_keys'],
-            )
+            # Run evaluation
+            evalkwargs = dict(evc['eval_kwargs']) if evc['eval_kwargs'] is not None else {}
+            if config['inference']:
+                D.inference(
+                    output_filename=evc['outpath'],
+                    dset=evc['set'],
+                    max_batches=max_batches,
+                    stream_write=evc['stream'],
+                    no_grad=no_grad,
+                    kwargs=D.eval_kwargs|evalkwargs,
+                    save_keys=evconfig['inference_save_keys'],
+                )
+            else:
+                out, df = D.evaluation(
+                    dset=evc['set'], 
+                    max_batches=max_batches, 
+                    save_df=evc['save'], 
+                    stream_write=evc['stream'],
+                    no_grad=no_grad, 
+                    kwargs=D.eval_kwargs|evalkwargs,
+                )
+            
+                # Saving results
+                if evc['save']:
+                    eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
+                    if evc['stream']:
+                        os.system(f"mv ./hold.parquet {eval_out_path}")
+                    else:
+                        df.to_parquet(eval_out_path)
+                print("\n", out)
         else:
-            out, df = D.evaluation(
-                dset=evc['set'], 
-                max_batches=max_batches, 
-                save_df=evc['save'], 
-                stream_write=evc['stream'],
-                no_grad=no_grad, 
-                kwargs=D.eval_kwargs|evalkwargs,
-            )
-        
-            # Saving results
-            if evc['save']:
-                eval_out_path = evc['outpath'] if evc['outpath'] is not None else os.path.join(svdir, "output.parquet")
-                if evc['stream']:
-                    os.system(f"mv ./hold.parquet {eval_out_path}")
-                else:
-                    df.to_parquet(eval_out_path)
-            print("\n", out)
-    else:
-        if config.get('pre_train_eval', False):
-            print("Test validation", end='')
-            out, _ = D.evaluation(dset='val', max_batches=D.val_steps, kwargs=D.eval_kwargs)
-            assert D.config['high_score'] in out.keys()
-            print("\rTest validation passed")
-        print(D.TrainEval()[-1])
+            if config.get('pre_train_eval', False):
+                print("Test validation", end='')
+                out, _ = D.evaluation(dset='val', max_batches=D.val_steps, kwargs=D.eval_kwargs)
+                assert D.config['high_score'] in out.keys()
+                print("\rTest validation passed")
+            print(D.TrainEval()[-1])
+    finally:
+        if U.dist_is_initialized():
+            try:
+                U.dist_barrier()
+            except Exception:
+                pass
+            try:
+                th.distributed.destroy_process_group()
+            except Exception:
+                pass
