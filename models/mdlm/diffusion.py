@@ -627,6 +627,13 @@ class Diffusion:
       x[:, i + 1] = y
     return x
 
+  def fill_null(self, x):
+      A,B = torch.where(x==self.eos_token_id)
+      msk = torch.arange(x.shape[1], device=x.device)[None].tile([x.shape[0], 1])
+      C,D = torch.where(msk[A] > B[:,None])
+      x[A.gather(0, C), D] = self.NT
+      return x
+
   @torch.no_grad()
   def _sample(
       self,
