@@ -197,6 +197,7 @@ class BaseDenovo:
             if self.config['log_wandb']: wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
             
             losses = self.train_step(batch)
+            total_loss = losses['loss']
             self.global_step += 1
             
             if self.config['log_wandb']:
@@ -204,12 +205,12 @@ class BaseDenovo:
                 global_grad_norm = U.global_grad_norm(self.model)
                 self.log_wandb(losses, global_grad_norm)
             else:
-                for key in running_loss.keys(): running_loss[key].append(losses[key].detach().cpu())
+                for key in running_loss.keys(): running_loss[key].append(losses[key])
                 rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
                 loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
             pbar.set_description(f"Loss: {loss_printout}")
             
-            self.running_loss.append(losses['loss'].detach().cpu())
+            self.running_loss.append(total_loss.detach().cpu())
             if self.log and (self.global_step % svfreq == 0):
                 self.savetxt(self.running_loss)
                 self.running_loss = []
@@ -991,14 +992,18 @@ class DenovoMDLMObj(BaseDenovo):
         }
         
         backbone = self.model.decoder
-        model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
-        
-        loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
-        
-        weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
-        loss = (weights*loss)[masked_token_mask]
+        if self.diff_config['custom_loss']:
+            model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+            loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
+            weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
+            loss = (weights*loss)[masked_token_mask]
+            other_losses = {}
+        else:
+            loss, other_losses = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+
+
         token_nll = loss.mean()
-        losses = {'loss': token_nll}
+        losses = {'loss': token_nll} | other_losses
         
         token_nll.backward()
         self.update_lr()
@@ -1007,11 +1012,12 @@ class DenovoMDLMObj(BaseDenovo):
         return losses
     
     def log_wandb(self, losses, grad_norm):
+        loss = losses.pop('loss').detach().cpu().item()
         wandb.log({
-            "Total loss": losses['loss'],
+            "Total loss": loss,
             'Global step': self.global_step,
             "Global grad norm": grad_norm,
-        })
+        } | losses)
 
     def on_train_epoch_end(self):
         if self.log:

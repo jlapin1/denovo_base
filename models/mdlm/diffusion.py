@@ -93,6 +93,7 @@ class Diffusion:
     
     self.backbone = backbone
     self.device = device
+    self.dtype = torch.float32
 
     self.T = self.config['T']
     self.subs_masking = self.config['subs_masking']
@@ -293,7 +294,7 @@ class Diffusion:
                                          xt=x,
                                          sigma=sigma)
     elif self.parameterization == 'd3pm':
-      return self._d3pm_parameterization(logits=logits)
+      return self._d3pm_parameterization(logits=logits), logits
     
     return logits, None
 
@@ -958,13 +959,13 @@ class Diffusion:
       new_attention_mask = attention_mask
     return input_tokens, output_tokens, new_attention_mask
 
-  def _reconstruction_loss(self, x0):
+  def _reconstruction_loss(self, x0, model_kwargs={}):
     t0 = torch.zeros(x0.shape[0], dtype=self.dtype,
                      device=self.device)
-    assert self.config.noise.type == 'loglinear'
+    assert self.config['noise']['type'] == 'loglinear'
     # The above assert is for d3pm parameterization
     unet_conditioning = self.noise(t0)[0][:, None]
-    model_output_t0 = self.forward(x0, unet_conditioning)
+    model_output_t0 = self.forward(x0, unet_conditioning, model_kwargs=model_kwargs)[0]
     return - torch.gather(input=model_output_t0,
                           dim=-1,
                           index=x0[:, :, None]).squeeze(-1)
@@ -1002,13 +1003,19 @@ class Diffusion:
                 model_output = backbone(xt, **model_kwargs)['out']
             model_kwargs['self_conditions'] = model_output.detach()
     
-    model_output = backbone(xt, **model_kwargs)['out']
+    model_output = (
+        backbone(xt, **model_kwargs)['out']
+        if self.config['custom_loss'] else
+        self.forward(xt, sigma[:, None], model_kwargs=model_kwargs)[0]
+    )
 
     if block_training:
         model_output = model_output[:, :sl]
         masked_token_mask = masked_token_mask[:, :sl]
     utils.print_nans(model_output, 'model_output')
-    return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
+    
+    if self.config['custom_loss']:
+        return model_output, dsigma / torch.expm1(sigma), masked_token_mask, t
     
     if self.parameterization == 'sedd':
       return dsigma[:, None] * self._score_entropy(
@@ -1018,10 +1025,12 @@ class Diffusion:
       diffusion_loss = self._d3pm_loss(
         model_output=model_output, xt=xt, x0=x0, t=t)
       if self.parameterization == 'd3pm':
-        reconstruction_loss = self._reconstruction_loss(x0)
+        if self.config['model']['self_condition']:
+            model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
+        reconstruction_loss = self._reconstruction_loss(x0, model_kwargs=model_kwargs)
       elif self.parameterization == 'subs':
-        reconstruction_loss = 0
-      return reconstruction_loss + diffusion_loss
+        reconstruction_loss = torch.zeros(())
+      return reconstruction_loss + diffusion_loss, {'reconstruction_loss': reconstruction_loss.mean().item(), 'diffusion_loss': diffusion_loss.mean().item()}
     
     # SUBS parameterization, continuous time.
     log_p_theta = torch.gather(
@@ -1034,7 +1043,7 @@ class Diffusion:
         - torch.exp(- self.noise.sigma_min))
     
     return - log_p_theta * (
-      dsigma / torch.expm1(sigma))[:, None]
+      dsigma / torch.expm1(sigma))[:, None], {}
 
   def _loss(self, x0, attention_mask):
     (input_tokens, output_tokens,
