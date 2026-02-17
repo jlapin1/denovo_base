@@ -180,10 +180,11 @@ class LoaderHF(LoaderObj):
         batch_size: int=100,
         num_workers: int=0,
         custom_columns: list=[],
+        datapath_extension="parquet/processed",
         **kwargs
     ):
 
-        dpe = "parquet/processed"
+        dpe = "parquet/processed" if datapath_extension is None else datapath_extension
         self.custom_columns = []
 
         if val_dataset_path is None:
@@ -217,8 +218,8 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file that matches the regex *sizes.tsv in the train_dataset_path and val_dataset_path
         #   2. val_name will pick out 1 file's size from the val_dataset_path
-        self.train_size = self.find_set_size_for_tqdm(train_dataset_path, train_name, val_name, "*species*size*tsv")
-        self.val_size = self.find_set_size_for_tqdm(val_dataset_path, val_name, regex="*species*size*tsv")
+        self.train_size = self.find_set_size_for_tqdm(join(train_dataset_path, dpe), train_name, val_name, "*species*size*tsv")
+        self.val_size = self.find_set_size_for_tqdm(join(val_dataset_path, dpe), val_name, regex="*species*size*tsv")
         
         ###########
         # Dataset #

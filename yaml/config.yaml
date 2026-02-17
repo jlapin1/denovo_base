@@ -44,6 +44,7 @@ loader:
   train_name: train
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
   val_name: val
+  datapath_extension: parquet/processed2
   masses_path: /cmnfs/data/proteomics/foundational_model/MKB2
   dictionary_path: /cmnfs/data/proteomics/foundational_model/MKB2/dictionary.tsv
   synonyms:
