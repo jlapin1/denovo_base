@@ -12,12 +12,12 @@ lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
 lr_warmup_end: 4.0e-4 # phase 2 LR
-lr_warmup_steps: 1750
+lr_warmup_steps: 900
 # Phase 2 - Flat
-lr_flat_steps: 27500
+lr_flat_steps: 4600
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 5700
+lr_decay_steps: 29440
 
 ############################
 # Loading, logging, saving #
