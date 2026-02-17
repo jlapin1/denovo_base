@@ -3,6 +3,7 @@ Functions that I don't want to define in Pretrainmodel.py
 """
 import torch as th
 import numpy as np
+import yaml
 from difflib import get_close_matches as gcm
 from sklearn.metrics import average_precision_score
 from copy import deepcopy
@@ -10,6 +11,46 @@ import datetime
 import re
 import os
 import torch.distributed as dist
+
+
+def _parse_overrides(argv):
+    overrides = []
+    for arg in argv:
+        if "=" not in arg:
+            raise ValueError(f"Override '{arg}' must be in key=value form.")
+        key, val = arg.split("=", 1)
+        overrides.append((key, yaml.safe_load(val)))
+    return overrides
+
+
+def _apply_overrides(cfg, overrides):
+    created = []
+    for keypath, value in overrides:
+        parts = keypath.split(".")
+        cur = cfg
+        for i, part in enumerate(parts):
+            last = i == len(parts) - 1
+            if isinstance(cur, list):
+                if not part.isdigit():
+                    raise KeyError(f"Expected list index at '{part}' in '{keypath}'.")
+                idx = int(part)
+                if idx >= len(cur):
+                    raise IndexError(f"Index {idx} out of range for '{keypath}'.")
+                if last:
+                    cur[idx] = value
+                else:
+                    cur = cur[idx]
+            else:
+                if last:
+                    if part not in cur:
+                        created.append(keypath)
+                    cur[part] = value
+                else:
+                    if part not in cur or cur[part] is None:
+                        cur[part] = {}
+                        created.append(".".join(parts[:i+1]))
+                    cur = cur[part]
+    return created
 
 def dist_is_initialized():
     return dist.is_available() and dist.is_initialized()
