@@ -64,7 +64,6 @@ $TORCHRUN \
   loader.dictionary_path=$SCRATCH_DATA/dictionary.tsv \
   loader.num_workers=2 \
   loader.val_num_workers=2 \
-  decoder_mdlm.diffusion_config.custom_loss=false \
+  decoder_mdlm.diffusion_config.custom_loss=true \
+  lr_warmup_end=1.0e-4 \
   eval_frequency=900 \
-  loader.val_steps=2 \
-  batch_size=512'

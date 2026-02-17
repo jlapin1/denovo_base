@@ -3,7 +3,7 @@ inference: False
 batch_size: 512
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 10
+epochs: 20
 
 #################
 # Learning rate #
@@ -59,7 +59,7 @@ loader:
   val_num_workers: 0
   val_batch_size: 1024
   reverse: False
-  val_steps: 100
+  val_steps: 2
   disperse: False
   remove_columns:
     - 'scan_number'
