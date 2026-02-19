@@ -100,6 +100,9 @@ def main():
     elif 'mdlm' in config['decoder_name']:
         print("<DSCOMMENT> Using masked diffusion language decoder")
         D = DenovoMDLMObj(config, svdir=svdir, rddir=rddir)
+    elif 'd3pm' in config['decoder_name']:
+        print("<DSCOMMENT> Using D3PM")
+        D = DenovoD3PMObj(config, svdir=svdir, rddir=rddir)
     else:
         print("<DSCOMMENT> Using autoregressive decoder")
         D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)

@@ -24,7 +24,7 @@ lr_decay_steps: 1000000 # 1000000
 ############################
 # Loading previous weights
 prev_wts: # Load weights from previous run (project path->timestamp)
-load_last: False
+load_last: True
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
 save_weights: False
@@ -69,7 +69,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: mdlm # *diff* | *mdlm* | *d3pm* |*
 
 # Encoder model
 
@@ -179,9 +179,9 @@ decoder_diff:
     mass_tol: 1e-2
 decoder_mdlm:
   diffusion_config:
-    T: 1000
+    T: 0
     subs_masking: False
-    parameterization: d3pm
+    parameterization: subs
     custom_loss: False
     time_conditioning: True
     sampling:
@@ -208,6 +208,8 @@ decoder_mdlm:
     model:
       length: 41
       self_condition: True
+decoder_d3pm:
+  steps: 128
 
 ############################
 # Classifier for diffusion #

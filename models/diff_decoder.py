@@ -323,7 +323,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         with th.no_grad(): 
             self.seq_emb.weight[self.NT] = th.zeros_like(self.seq_emb.weight[self.NT])
         # lm_head: backward
-        self.lm_head = nn.Linear(input_output_units, len(self.outdict))
+        self.lm_head = nn.Linear(input_output_units, get_max_dic_value(self.outdict))
         with th.no_grad():
             self.lm_head.weight = self.seq_emb.weight
 
@@ -366,7 +366,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         out = self.Main(
             emb, kv_feats=kv_feats, embed=time_emb, 
             spec_mask=specmask, seq_mask=None
-        )
+        )['out']
         out = self.RemovePrecursorToken(out)
         out = self.final_down_proj(out)
         out_dict = {'mean': out}
@@ -620,3 +620,12 @@ class MDLMDecoder(base_diffusion_decoder):
         if save_p:
             output['p_save'] = p_save
         return output
+
+class D3PMDecoder(MDLMDecoder):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def finish_dict(self):
+        self.rev_outdict = {n:m for m,n in self.outdict.items()}
+        self.predcats = get_max_dic_value(self.outdict)
+        self.scale = Scale(self.outdict)
