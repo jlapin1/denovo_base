@@ -139,10 +139,18 @@ class BaseDenovo:
         # Found nothing
         else:
             print(f"Found no weights fitting regular expression")
+    
+    def restore_model(self):
+        if self.config['prev_wts'] is not None:
+            retain = False if self.config['load_last'] else True
+            self.load_saved_weights(self.model, "model", self.config['load_last'], retain=retain)
+            if self.config['load_last']:
+                self.load_saved_weights(self.opt, "opt", self.config['load_last'])
+                U.optimizer_to(self.opt, device)
 
     def split_labels_str(self, incl_str):
         return [label for label in self.dl.labels if incl_str in label]
-
+    """
     def encinp(self, 
                batch, 
                mask_length=True, 
@@ -167,7 +175,7 @@ class BaseDenovo:
         }
 
         return model_inp
-    
+    """
     def train_epoch(self, svfreq=10000):
         
         bs = self.config['batch_size']
@@ -198,7 +206,7 @@ class BaseDenovo:
                 loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
             pbar.set_description(f"Loss: {loss_printout}")
             
-            self.running_loss.append(total_loss.detach().cpu())
+            self.running_loss.append(total_loss)
             if self.log and (self.global_step % svfreq == 0):
                 self.savetxt(self.running_loss)
                 self.running_loss = []
@@ -636,13 +644,8 @@ class DenovoArDSObj(BaseDenovo):
         self.predict_sequence = self.model.decoder.predict_sequence
         
         # loading previous weights
-        if config['prev_wts'] is not None:
-            retain = False if config['load_last'] else True
-            self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            if config['load_last']:
-                self.load_saved_weights(self.opt, "opt", config['load_last'])     
-                U.optimizer_to(self.opt, device)
-        
+        self.restore_model()
+                
         self.model.to(device)
     
     def inptarg(self, batch):
@@ -691,7 +694,7 @@ class DenovoArDSObj(BaseDenovo):
         self.update_lr()
         self.opt.step()
         
-        return {'loss': loss}
+        return {'loss': loss.item()}
 
     def log_wandb(self, losses, norm):
         wandb.log({
@@ -738,13 +741,8 @@ class DenovoDiffusionObj(BaseDenovo):
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
         
         # loading previous weights
-        if config['prev_wts'] is not None:
-            retain = False if config['load_last'] else True
-            self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            if config['load_last']:
-                self.load_saved_weights(self.opt, "opt", config['load_last'])
-                U.optimizer_to(self.opt, device)
-        
+        self.restore_model()
+                
         self.model.to(device)
 
         # Classifier
@@ -814,9 +812,10 @@ class DenovoDiffusionObj(BaseDenovo):
             noise=None
         )
         
-        losses = {key: loss.mean() for key, loss in losses.items()}
-        loss = losses['loss']
+        loss = losses['loss'].mean()
         loss.backward()
+        with th.no_grad():
+            losses = {key: loss.mean().detach().cpu().item() for key, loss in losses.items()}
         
         self.update_lr()
         self.opt.step()
@@ -888,37 +887,20 @@ class DenovoMDLMObj(BaseDenovo):
             encoder_config = config['encoder_dict'],
             decoder_config = config['decoder_diff']['model_config'],
             diff_config = diff_config,
-            op_peaks = config['top_peaks'], 
+            top_peaks = config['top_peaks'], 
             max_peptide_length = config['pep_length'][1], 
             token_dict = self.data.amod_dic,
             ensemble_config   = config['decoder_diff']['ensemble'],
             masses_path = config['loader']['masses_path'],
         )
         self.initialize_token_loss()
-        
-        # Moving average of weights
-        import models.mdlm.ema as ema
-        import itertools
-        if diff_config['training']['ema'] > 0:
-            self.ema = ema.ExponentialMovingAverage(
-                itertools.chain(
-                    self.model.encoder.parameters(),
-                    self.model.decoder.parameters(),
-                    self.model.diff_obj.noise.parameters(),
-                ),
-                decay=diff_config['training']['ema']
-            )
-        
+                
         # Optimizer
         print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
         
         # loading previous weights
-        if config['prev_wts'] is not None:
-            retain = False if config['load_last'] else True
-            self.load_saved_weights(self.model, "model", config['load_last'], retain=retain)
-            self.load_saved_weights(self.opt, "opt", config['load_last'])
-            U.optimizer_to(self.opt, device)
+        self.restore_model()
         
         self.model.to(device)
 
@@ -991,7 +973,7 @@ class DenovoMDLMObj(BaseDenovo):
 
 
         token_nll = loss.mean()
-        losses = {'loss': token_nll} | other_losses
+        losses = {'loss': token_nll.item()} | other_losses
         
         token_nll.backward()
         self.update_lr()
@@ -1017,3 +999,43 @@ class DenovoMDLMObj(BaseDenovo):
             except:
                 pass
 
+class DenovoD3PMObj(BaseDenovo):
+    def __init__(self, config, svdir='./save/', rddir=None):
+        super().__init__(
+            config=config, 
+            svdir=svdir,
+            rddir=rddir,
+        )
+        self.training_loss_keys.extend(['loss'])
+        self.eval_kwargs = {}
+
+        from models.seq2seq import Seq2SeqD3PM
+        
+        diff_config = config['decoder_d3pm']
+        self.diff_config = diff_config
+        self.max_length = config['pep_length'][1]
+        self.steps = diff_config['steps']
+        #config['decoder_diff']['diffusion_config']['pad_tok_id'] = self.data.amod_dic['X']
+        #config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
+        
+        # The diffusion models share the model_config, but with a la carte alterations
+        #config['decoder_diff']['model_config']['self_condition'] = diff_config['self_condition']
+        
+        self.model = Seq2SeqD3PM(
+            encoder_config = config['encoder_dict'],
+            decoder_config = config['decoder_diff']['model_config'],
+            diff_config = diff_config,
+            top_peaks = config['top_peaks'], 
+            max_peptide_length = config['pep_length'][1], 
+            token_dict = self.data.amod_dic,
+            ensemble_config   = config['decoder_diff']['ensemble'],
+            masses_path = config['loader']['masses_path'],
+        )
+
+        # Optimizer
+        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+        self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
+
+        self.restore_model()
+
+        self.model.to(device)

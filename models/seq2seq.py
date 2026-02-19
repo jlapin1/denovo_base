@@ -1,10 +1,11 @@
 import torch as th
 from torch import nn
 from models.encoder import Encoder
-from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder
+from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder, D3PMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
 from models.mdlm.diffusion import Diffusion as MDLMDiffusion
+from models.d3pm import D3PM
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -382,3 +383,38 @@ class Seq2SeqMDLM(Seq2Seq):
         return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
         return return_
 
+class Seq2SeqD3PM(Seq2Seq):
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+        )
+        # Decoder model
+        decoder_config['kv_indim'] = self.encoder.run_units
+        self.decoder = D3PMDecoder(
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            **decoder_config,
+        )
+        # Diffusion object
+        self.diff_obj = D3PM(
+            x0_model=self.decoder,
+            n_T=diff_config['steps'],
+            num_classes=(self.decoder.predcats),
+        )
+        self.decoder.diff_obj = self.diff_obj
+
+        self.ens_size = ensemble_config['ensemble_n']
+        self.mass_tol = eval(ensemble_config['mass_tol'])
+        # Scale
+        if 'masses_path' in kwargs:
+            self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
