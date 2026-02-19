@@ -179,9 +179,9 @@ decoder_diff:
     mass_tol: 1e-2
 decoder_mdlm:
   diffusion_config:
-    T: 1000
+    T: 0
     subs_masking: False
-    parameterization: d3pm
+    parameterization: subs
     custom_loss: False
     time_conditioning: True
     sampling:
