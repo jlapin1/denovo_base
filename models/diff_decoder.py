@@ -445,6 +445,7 @@ class MDLMDecoder(base_diffusion_decoder):
         output_sigma=False,
         clip_denoised=False,
         clamp_denoised=False,
+        wavelength_bounds=(1e-6, 10),
         **kwargs
     ):
         super().__init__(
@@ -472,6 +473,7 @@ class MDLMDecoder(base_diffusion_decoder):
         self.max_sl = decoder_config['sequence_length'] # + 1
 
         # Timestep embedding
+        self.wavelength_bounds = wavelength_bounds
         self.time_embed = nn.Sequential(
             nn.Linear(timestep_dimension, timestep_dimension),
             nn.SiLU(),
@@ -532,7 +534,7 @@ class MDLMDecoder(base_diffusion_decoder):
         doubled=False,
     ):
         # Timestep
-        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, *self.wavelength_bounds, self.timestep_dimension))
 
         # Beginning
         seq_emb = self.embed_sequence(x)
@@ -629,3 +631,65 @@ class D3PMDecoder(MDLMDecoder):
         self.rev_outdict = {n:m for m,n in self.outdict.items()}
         self.predcats = get_max_dic_value(self.outdict)
         self.scale = Scale(self.outdict)
+
+    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
+        bs = embedding.shape[0]
+        model_kwargs = {
+            'kv_features': embedding,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+        }
+        blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
+        
+        #out = th.full((bs, self.max_sl), self.MASK, dtype=th.int64, device=embedding.device)
+        logits = th.empty((bs, self.max_sl, self.predcats), dtype=th.float32, device=embedding.device)
+        x = th.empty((bs, 0), dtype=th.int64).to(embedding.device)
+        for m in range(blocks):
+            
+            # Add to input
+            if blocks == 1:
+                x = th.randint(0, self.predcats, (bs, self.max_sl,), device=x.device)
+            else:
+                block_size = self.block_size if m<blocks-1 else out.shape[1]-m*self.block_size
+                x = self.add_block(x, block_size=block_size)
+                model_kwargs['seqmask'] = self.get_inference_mask(x.shape[1])[None,None].to(x.device)
+            
+            # Predict
+            out_ = self.diff_obj._sample(
+                x=x,
+                save_x=save_x,
+                save_p=save_p,
+                top=top,
+                num_steps=num_steps,
+                progress=progress,
+                model_kwargs=model_kwargs
+            )
+            
+            # Add to output
+            if blocks == 1:
+                out = out_['prediction']
+                logits = out_['logits']
+                if save_x: x_save = out_['x_save']
+                if save_p: p_save = out_['p_save']
+            else:
+                extent = min(self.max_sl, (m+1)*self.block_size)
+                out[:, : extent] = out_['prediction'][:,:extent]
+                logits[:, m*self.block_size : extent] = out_['logits'][:, m*self.block_size : extent]
+                x = out_['prediction']
+                if save_x:
+                    if m==0:
+                        x_save = out_['x_save']
+                    else:
+                        x_save = th.cat([x_save, out_['x_save'][:,:,m*self.block_size:extent]], dim=2)
+                if save_p:
+                    if m==0:
+                        p_save = out_['p_save']
+                    else:
+                        p_save = th.cat([p_save, out_['p_save'][:,:,m*self.block_size:extent]], dim=2)
+                
+        output = {'prediction' : out, 'logits': logits,}
+        if save_x:
+            output['x_save'] = x_save
+        if save_p:
+            output['p_save'] = p_save
+        return output

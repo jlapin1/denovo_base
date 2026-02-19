@@ -400,9 +400,10 @@ class Seq2SeqD3PM(Seq2Seq):
         )
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
+        decoder_config['wavelength_bounds'] = (1, 5*diff_config['steps'])
         self.decoder = D3PMDecoder(
-            token_dict          = token_dict,
-            decoder_config      = decoder_config,
+            token_dict = token_dict,
+            decoder_config = decoder_config,
             **decoder_config,
         )
         # Diffusion object
@@ -418,3 +419,58 @@ class Seq2SeqD3PM(Seq2Seq):
         # Scale
         if 'masses_path' in kwargs:
             self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+    
+    def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        spectrum_mask = dictionary['mask']
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        return decout
+    
+    def predict_sequence(
+        self, 
+        batch: dict,             # batch of inputs
+        save_x: bool=False,      # return the intseqs at every step
+        save_p: bool=False,      # return the logits at every step
+        num_steps: int=None,     # number of sampling steps in decoder
+        top: int=None,           # top categorical sampling; None defaults to config.yaml setting
+        n: int=None,             # return n sequences per batch member; None defaults to config.yaml setting
+        return_full: dict=False, # return n outputs for each batch member (instead of 1/top sequence)
+        progress: bool=False,    # tqdm progress bar
+    ):
+        # Input batch
+        batch_size, SL = batch['mz'].shape
+        n = self.ens_size if n==None else n
+        batch = expand_batch(batch, n=n)
+        
+        # Model outputs
+        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        seqs = diffout.pop('prediction')
+        logits = diffout.pop('logits')
+        
+        # Probability calculations
+        if save_p and save_x:
+            nbs, sl = seqs.shape
+            slmask = th.arange(sl, device=device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
+            diffout['aa_prob_min'], diffout['pep_prob_min'] = self.calculate_min_peptide_prob(seqs, diffout['p_save'], slmask)
+            
+            reveal = self.get_reveal_steps(diffout['x_save'])
+            reveal_mask = th.arange(diffout['p_save'].shape[1], device=device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
+            diffout['aa_entropy'], diffout['pep_entropy'] = self.calculate_entropy_prob(diffout['p_save'], reveal_mask, slmask)
+        
+        # Find winners
+        if n == 1:
+            winners = th.arange(batch_size)
+        else:
+            winners = find_winners(
+                seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
+            )
+        
+        # Select winners and reshape
+        reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
+        top_sequences = reshape(seqs[winners])
+        logits = reshape(logits[winners])
+        additional_outputs = {x: reshape(y[winners]) for x, y in diffout.items()}
+
+        return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
+        return return_

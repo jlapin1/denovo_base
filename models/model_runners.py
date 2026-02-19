@@ -150,32 +150,7 @@ class BaseDenovo:
 
     def split_labels_str(self, incl_str):
         return [label for label in self.dl.labels if incl_str in label]
-    """
-    def encinp(self, 
-               batch, 
-               mask_length=True, 
-               return_mask=False, 
-               ):
-
-        mzab = th.cat([batch['mz'][...,None], batch['ab'][...,None]], -1)
-        model_inp = {
-            'x': mzab.to(device),
-            'charge': (
-                batch['charge']
-                if self.config['encoder_dict']['use_charge'] else 
-                None
-            ),
-            'mass': (
-                batch['mass']
-                if self.config['encoder_dict']['use_mass'] else
-                None
-            ),
-            'length': batch['length'] if mask_length else None,
-            'return_mask': return_mask,
-        }
-
-        return model_inp
-    """
+    
     def train_epoch(self, svfreq=10000):
         
         bs = self.config['batch_size']
@@ -1019,7 +994,7 @@ class DenovoD3PMObj(BaseDenovo):
         #config['decoder_diff']['diffusion_config']['sequence_len'] = self.config['pep_length'][1] + 1 # b/c of eos token
         
         # The diffusion models share the model_config, but with a la carte alterations
-        #config['decoder_diff']['model_config']['self_condition'] = diff_config['self_condition']
+        config['decoder_diff']['model_config']['self_condition'] = diff_config['self_condition']
         
         self.model = Seq2SeqD3PM(
             encoder_config = config['encoder_dict'],
@@ -1039,3 +1014,54 @@ class DenovoD3PMObj(BaseDenovo):
         self.restore_model()
 
         self.model.to(device)
+
+    def inptarg(self, batch):
+        bs, sl = batch['intseq'].shape
+        
+        #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
+        
+        target = deepcopy(batch['intseq'])
+        target = self.model.decoder.append_null_token(target)
+        target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
+        
+        loss_mask = self.model.decoder.sequence_mask(target)
+        
+        return None, target, loss_mask
+
+    def train_step(self, batch):
+        block_decoding = False #True if self.model.decoder.block_size is not None else False
+        batch = U.Dict2dev(batch, device)
+        _, target, loss_mask = self.inptarg(batch)
+        training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size, True)[None,None] if block_decoding else None
+        
+        self.model.to(device)
+        self.model.train()
+        self.model.zero_grad()
+        
+        embedding = self.model.encoder_embedding(batch)
+        
+        model_kwargs = {
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+            'kv_features': embedding['emb'],
+            'seqmask': training_mask,
+            'doubled': True if block_decoding else False,
+        }
+        
+        loss, other_losses = self.model.diff_obj.forward(x=target, model_kwargs=model_kwargs)
+        
+        losses = {'loss': loss.item()} | other_losses
+        
+        loss.backward()
+        self.update_lr()
+        self.opt.step()
+        
+        return losses
+    
+    def log_wandb(self, losses, grad_norm):
+        loss = losses.pop('loss').detach().cpu().item()
+        wandb.log({
+            "Total loss": loss,
+            'Global step': self.global_step,
+            "Global grad norm": grad_norm,
+        } | losses)
