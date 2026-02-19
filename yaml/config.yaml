@@ -69,7 +69,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *d3pm* |*
+decoder_name: d3pm # *diff* | *mdlm* | *d3pm* |*
 
 # Encoder model
 
@@ -207,9 +207,10 @@ decoder_mdlm:
       type: loglinear
     model:
       length: 41
-      self_condition: True
+      self_condition: False
 decoder_d3pm:
-  steps: 128
+  steps: 100
+  self_condition: True
 
 ############################
 # Classifier for diffusion #
