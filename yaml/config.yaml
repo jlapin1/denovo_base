@@ -11,7 +11,7 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 2.0e-4 # phase 2 LR
+lr_warmup_end: 1.0e-4 # phase 2 LR
 lr_warmup_steps: 20000 #20000
 # Phase 2 - Flat
 lr_flat_steps: 266000 #266000
@@ -27,12 +27,12 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: True
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -44,7 +44,7 @@ loader:
   train_name: train
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
   val_name: val
-  datapath_extension: parquet/processed2
+  datapath_extension: parquet/hela
   masses_path: /cmnfs/data/proteomics/foundational_model/MKB2
   dictionary_path: /cmnfs/data/proteomics/foundational_model/MKB2/dictionary.tsv
   synonyms:
@@ -69,7 +69,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: d3pm # *diff* | *mdlm* | *d3pm* |*
+decoder_name: ar # *diff* | *mdlm* | *d3pm* |*
 
 # Encoder model
 
@@ -207,7 +207,7 @@ decoder_mdlm:
       type: loglinear
     model:
       length: 41
-      self_condition: False
+      self_condition: True
 decoder_d3pm:
   steps: 100
   self_condition: True
