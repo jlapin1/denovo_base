@@ -41,16 +41,19 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
 
 def collate_fn(batch_list, custom_columns=[]):
     out = {}
-    out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
+    #out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
     out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
-    maxlength = out['length'].max()
-    out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
-    out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    #maxlength = out['length'].max()
+    #out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    out['mz'] = th.tensor(np.stack([m['mz_array'] for m in batch_list]), dtype=th.float32)
+    #out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+    out['ab'] = th.tensor(np.stack([m['intensity_array'] for m in batch_list]), dtype=th.float32)
     out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
     out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
     if 'tokenized_sequence' in batch_list[0].keys():
         out['peplen'] = th.tensor(np.stack([m['peptide_length'] for m in batch_list]), dtype=th.int32)
-        out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)
+        #out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)
+        out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'] for m in batch_list]), dtype=th.int32)
         #out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:41] for m in batch_list]), dtype=th.int32)
     if 'chimeric' in batch_list[0].keys():
         out['chimeric'] = th.tensor(np.stack([m['chimeric'] for m in batch_list]))

@@ -16,6 +16,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import math
+from accelerate import Accelerator
 F = th.nn.functional
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
@@ -147,6 +148,17 @@ class BaseDenovo:
             if self.config['load_last']:
                 self.load_saved_weights(self.opt, "opt", self.config['load_last'])
                 U.optimizer_to(self.opt, device)
+    
+    def accelerate(self):
+        self.accelerator = Accelerator(gradient_accumulation_steps=2)
+        model, optimizer, training_dataloader = self.accelerator.prepare(
+            self.model, self.opt, self.data.dataloader['train']
+        )
+        self.model = self.model
+        self._model = model
+        self.opt = optimizer
+        self.data.dataloader['train'] = training_dataloader
+        self.device = self.accelerator.device
 
     def split_labels_str(self, incl_str):
         return [label for label in self.dl.labels if incl_str in label]
@@ -158,7 +170,12 @@ class BaseDenovo:
         
         # Progress bar
         train_steps = int(self.data.train_size // bs)
-        pbar = tqdm(self.data.dataloader['train'], total=train_steps, smoothing=0.6)
+        pbar = tqdm(
+            self.data.dataloader['train'],
+            total=train_steps,
+            smoothing=0.6,
+            disable=not self.accelerator.is_local_main_process
+        )
 
         epoch_start = time()
         step_end=epoch_start
@@ -532,6 +549,7 @@ class BaseDenovo:
             return out, None
 
     def TrainEval(self, eval_dset='val'):
+        #self.accelerate()
         start_time = time()
         lines = []
         for i in range(self.config['epochs']):
@@ -871,13 +889,16 @@ class DenovoMDLMObj(BaseDenovo):
         self.initialize_token_loss()
                 
         # Optimizer
-        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
         
         # loading previous weights
         self.restore_model()
         
-        self.model.to(device)
+        #self.model.to(device)
+        self.accelerate()
+
+        if self.accelerator.is_local_main_process:
+            print(f"<DSCOMMENT> Total model parameters: {self._model.module.total_params():,}")
 
         self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
         self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token).to(device)
@@ -909,8 +930,8 @@ class DenovoMDLMObj(BaseDenovo):
         #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
         
         target = deepcopy(batch['intseq'])
-        target = self.model.decoder.append_null_token(target)
-        target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
+        target = self._model.module.decoder.append_null_token(target)
+        target = self._model.module.decoder.replace_with_eos_token(target, batch['peplen'])
         
         loss_mask = self.model.decoder.sequence_mask(target)
         
@@ -918,13 +939,13 @@ class DenovoMDLMObj(BaseDenovo):
 
     def train_step(self, batch):
         block_decoding = True if self.model.decoder.block_size is not None else False
-        batch = U.Dict2dev(batch, device)
+        #batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
         training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size, True)[None,None] if block_decoding else None
         
-        self.model.to(device)
-        self.model.train()
-        self.model.zero_grad()
+        #self.model.to(device)
+        self._model.train()
+        self._model.zero_grad()
         
         embedding = self.model.encoder_embedding(batch)
         
@@ -950,10 +971,11 @@ class DenovoMDLMObj(BaseDenovo):
         token_nll = loss.mean()
         losses = {'loss': token_nll.item()} | other_losses
         
-        token_nll.backward()
+        #token_nll.backward()
+        self.accelerator.backward(token_nll)
         self.update_lr()
         self.opt.step()
-        
+                
         return losses
     
     def log_wandb(self, losses, grad_norm):
@@ -1030,11 +1052,11 @@ class DenovoD3PMObj(BaseDenovo):
 
     def train_step(self, batch):
         block_decoding = False #True if self.model.decoder.block_size is not None else False
-        batch = U.Dict2dev(batch, device)
+        #batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
         training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size, True)[None,None] if block_decoding else None
         
-        self.model.to(device)
+        #self.model.to(device)
         self.model.train()
         self.model.zero_grad()
         
