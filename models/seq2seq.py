@@ -420,6 +420,17 @@ class Seq2SeqD3PM(Seq2Seq):
         if 'masses_path' in kwargs:
             self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
     
+    def calculate_min_peptide_prob(self, prediction, logits_in_time, sl_mask):
+        bs, steps, sl, cats = logits_in_time.shape
+        min_conf_ = logits_in_time.gather(-1, prediction[:,None,:,None].tile([1,steps,1,1]))[...,0].min(dim=1)[0]
+        return min_conf_, (min_conf_*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9)
+
+    def calculate_entropy_prob(self, logits_in_time, reveal_mask, sl_mask):
+        entropy = -(logits_in_time * (logits_in_time+1e-9).log()).sum(dim=-1)
+        aa_entropy = (entropy*reveal_mask).sum(dim=1) / (reveal_mask.sum(dim=1)+1e-9) # average over masked tokens
+        pep_entropy = (aa_entropy*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9) # average over sequence length
+        return aa_entropy, pep_entropy
+
     def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
         dictionary = self.encoder_embedding(batch)
         embedding = dictionary['emb']
@@ -454,9 +465,9 @@ class Seq2SeqD3PM(Seq2Seq):
             slmask = th.arange(sl, device=device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
             diffout['aa_prob_min'], diffout['pep_prob_min'] = self.calculate_min_peptide_prob(seqs, diffout['p_save'], slmask)
             
-            reveal = self.get_reveal_steps(diffout['x_save'])
-            reveal_mask = th.arange(diffout['p_save'].shape[1], device=device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
-            diffout['aa_entropy'], diffout['pep_entropy'] = self.calculate_entropy_prob(diffout['p_save'], reveal_mask, slmask)
+            #reveal = self.get_reveal_steps(diffout['x_save'])
+            #reveal_mask = th.arange(diffout['p_save'].shape[1], device=device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
+            #diffout['aa_entropy'], diffout['pep_entropy'] = self.calculate_entropy_prob(diffout['p_save'], reveal_mask, slmask)
         
         # Find winners
         if n == 1:
