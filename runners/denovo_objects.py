@@ -259,7 +259,7 @@ class BaseDenovo:
                     self.running_loss = []
                 if self.config['save_weights']:
                     self.save_last()
-            if self.eval_frequency is not None and self.config['save_weights']:
+            if self.eval_frequency is not None:
                 local_eval_due = (time() - self.eval_time) > self.eval_frequency
                 if self.distributed:
                     # Synchronize the eval trigger across all ranks to avoid train/eval divergence.
@@ -275,7 +275,7 @@ class BaseDenovo:
                     out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
                     self.eval_out = out
                     new_score = out[self.config['high_score']]
-                    if self.is_main:
+                    if self.config['save_weights'] and self.is_main:
                         self.checkpoint(new_score)
                     self.eval_time = time()
                     if self.config['log_wandb'] and self.is_main:

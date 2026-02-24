@@ -2,8 +2,8 @@ eval_only: False
 inference: False
 batch_size: 512
 top_peaks: 100
-pep_length: [0, 14]
-epochs: 200
+pep_length: [0, 40]
+epochs: 100
 
 #################
 # Learning rate #
@@ -11,13 +11,13 @@ epochs: 200
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 1.5e-3 # phase 2 LR
-lr_warmup_steps: 100 #20000
+lr_warmup_end: 1.0e-4 # phase 2 LR
+lr_warmup_steps: 20000 #20000
 # Phase 2 - Flat
-lr_flat_steps: 1680 #266000
+lr_flat_steps: 266000 #266000
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 2000 # 1000000
+lr_decay_steps: 1000000 # 1000000
 
 ############################
 # Loading, logging, saving #
@@ -27,42 +27,37 @@ prev_wts: #/cmnfs/proj/diffusion/experiments/2025-11-04_06-50-17 # Load weights 
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
-eval_frequency:
+eval_frequency: 5400
 # Logging
 log_wandb: True
 wandb_entity: kall
-wandb_project: diffusion_denovoMNIST
+wandb_project: diffusion
 
 ##################################
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /Users/alfred/Datasets/DeNovoMNIST/kingdoms_sacc_8k
+  train_dataset_path: /proj/bedrock/datasets/9_species_V2
   train_name:
-  val_dataset_path: /Users/alfred/Datasets/DeNovoMNIST/kingdoms_sacc_8k
-  val_name:
-  masses_path: ./yaml/denovomnist_vocab
-  dictionary_path: ./yaml/denovomnist_vocab/dictionary.tsv
-  tokenizer_path: .
+  val_dataset_path: /proj/bedrock/datasets/9_species_V2
+  val_name: cerevisiae
+  use_lance: False
+  lance_species_root: /proj/bedrock/datasets/9_species_V2/lance_species
+  masses_path: /proj/bedrock/datasets/9_species_V2
+  dictionary_path: /proj/bedrock/datasets/9_species_V2/ns_dictionary.tsv
   synonyms:
     #- [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  split_parquets: True
-  streaming: False
-  keep_in_memory: True
-  use_precomputed_encoder: True
-  encoder_arrays_path: /Users/alfred/Datasets/DeNovoMNIST/kingdoms_sacc_8k
-  precomputed_encoder_dim: 512
-  num_workers: 0
+  num_workers: 2
+  val_num_workers: 0
   val_batch_size: 1024
-  test_batch_size: 1024
   reverse: False
-  val_steps: -1
+  val_steps: 100
   disperse: False
   remove_columns:
     - 'scan_number'
@@ -77,22 +72,22 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: mdlm # *diff* | *mdlm* | *
+decoder_name: d3pm # *diff* | *mdlm* | *d3pm*
 
 # Encoder model
 
 encoder_dict:
   norm_type: 'layer'
-  mz_units: 256
-  ab_units: 64
+  mz_units: 1024
+  ab_units: 256
   subdivide: False
-  running_units: 128
-  att_d: 32
-  att_h: 4
+  running_units: 512
+  att_d: 64
+  att_h: 8
   gate: False
   alphabet: False
-  depth: 4
-  ffn_multiplier: 1
+  depth: 9
+  ffn_multiplier: 2
   prenorm: True
   prec_type: inject_pre
   use_charge: False
@@ -100,11 +95,11 @@ encoder_dict:
   bias: # 'pairwise' | 'regular' | False | None
   dropout: 0.25
   recycling_its: 1
-  pw_mz_units: 128
-  pw_run_units: 32
-  pw_attention_ch: 16
+  pw_mz_units: 512
+  pw_run_units: 64
+  pw_attention_ch: 32
   pw_attention_h: 2
-  pw_n: 2
+  pw_n: 4
   pw_blocks: 0
 
 # Decoder model
@@ -131,7 +126,7 @@ decoder_ar:
 
 decoder_diff:
   diffusion_config:
-    sequence_len: 15
+    sequence_len: 21
     learn_sigma: False
     sigma_small: False
     sigma_weight: 1.0 # vlb_weight
@@ -147,8 +142,8 @@ decoder_diff:
     rescale_learned_sigmas: True
     use_checkpoint: False
     model_arch: transformer
-    in_channel: 128
-    out_channel: 128
+    in_channel: 512
+    out_channel: 512
     logits_mode: 1
     training_mode: diffusion-lm
     init_pretrained: False
@@ -159,14 +154,14 @@ decoder_diff:
     schedule_update_stride: 2000000
     use_loss_mask: False
   model_config:
-    running_units: 256
-    sequence_length: 15
-    depth: 6
-    d: 32
-    h: 4
-    ffn_multiplier: 1
-    timestep_dimension: 64
-    precursor_dimension: 64
+    running_units: 512
+    sequence_length: 41
+    depth: 9
+    d: 64
+    h: 8
+    ffn_multiplier: 2
+    timestep_dimension: 128
+    precursor_dimension: 128
     use_charge: True
     use_mass: True
     use_leftover: False
@@ -192,7 +187,7 @@ decoder_mdlm:
     time_conditioning: True
     sampling:
       predictor: ddpm_cache
-      steps: 4
+      steps: 64
       sampler: linear # linear | cosine | sigmoid | cube
       sigmoid_zero_value: 0.00247
       top: 1
@@ -212,30 +207,30 @@ decoder_mdlm:
     noise:
       type: loglinear
     model:
-      length: 15
+      length: 41
       self_condition: True
 
 decoder_d3pm:
   diffusion_config:
-    T: 256
+    T: 128
     eps: 1.0e-6
     model_prediction: x0
     loss_type: hybrid # kl | cross_entropy_x0 | hybrid
-    hybrid_coeff: 1.0e-2
+    hybrid_coeff: 1.0e-3
     custom_loss: False
     transition:
       type: uniform # uniform | absorbing | explicit
       beta_schedule: cosine # cosine | linear
       beta_start: 1.0e-4
-      beta_end: 8.0e-3
+      beta_end: 2.0e-2
     sampling:
-      steps: 16
+      steps: 128
       top: 1
       prior_type: uniform # uniform | absorbing
     training:
       ema: 0.9999
     model:
-      length: 15
+      length: 41
       self_condition: True
 
 ############################

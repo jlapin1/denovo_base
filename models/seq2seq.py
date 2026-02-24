@@ -5,6 +5,7 @@ from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
 from models.mdlm.diffusion import Diffusion as MDLMDiffusion
+from models.d3pm.diffusion import D3PMDiffusion
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -361,6 +362,118 @@ class Seq2SeqMDLM(Seq2Seq):
         )
         # Diffusion object
         self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict, self.decoder)
+        self.decoder.diff_obj = self.diff_obj
+
+        self.ens_size = ensemble_config['ensemble_n']
+        self.mass_tol = eval(ensemble_config['mass_tol'])
+        # Scale
+        if 'masses_path' in kwargs:
+            self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+    
+    def get_reveal_steps(self, x_in_time):
+        trajectory_length = x_in_time.shape[1]
+        reveal = ((x_in_time != self.decoder.MASK).int().argmax(1)-1).clip(min=0)
+        never_selected = x_in_time[:, -1] == self.decoder.MASK
+        reveal[never_selected] = trajectory_length - 2
+        return reveal
+
+    def calculate_min_peptide_prob(self, prediction, logits_in_time, sl_mask):
+        bs, steps, sl, cats = logits_in_time.shape
+        min_conf_ = logits_in_time.gather(-1, prediction[:,None,:,None].tile([1,steps,1,1]))[...,0].min(dim=1)[0]
+        return min_conf_, (min_conf_*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9)
+
+    def calculate_entropy_prob(self, logits_in_time, reveal_mask, sl_mask):
+        entropy = -(logits_in_time * (logits_in_time+1e-9).log()).sum(dim=-1)
+        aa_entropy = (entropy*reveal_mask).sum(dim=1) / (reveal_mask.sum(dim=1)+1e-9) # average over masked tokens
+        pep_entropy = (aa_entropy*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9) # average over sequence length
+        return aa_entropy, pep_entropy
+
+    def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        spectrum_mask = dictionary['mask']
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        return decout
+
+    def predict_sequence(
+        self, 
+        batch: dict,             # batch of inputs
+        save_x: bool=False,      # return the intseqs at every step
+        save_p: bool=False,      # return the logits at every step
+        num_steps: int=None,     # number of sampling steps in decoder
+        top: int=None,           # top categorical sampling; None defaults to config.yaml setting
+        n: int=None,             # return n sequences per batch member; None defaults to config.yaml setting
+        return_full: dict=False, # return n outputs for each batch member (instead of 1/top sequence)
+        progress: bool=False,    # tqdm progress bar
+    ):
+        # Input batch
+        batch_size, SL = batch['mz'].shape
+        n = self.ens_size if n==None else n
+        batch = expand_batch(batch, n=n)
+        
+        # Model outputs
+        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        seqs = diffout.pop('prediction')
+        logits = diffout.pop('logits')
+        
+        # Probability calculations
+        if save_p and save_x:
+            nbs, sl = seqs.shape
+            slmask = th.arange(sl, device=seqs.device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
+            diffout['aa_prob_min'], diffout['pep_prob_min'] = self.calculate_min_peptide_prob(seqs, diffout['p_save'], slmask)
+            
+            reveal = self.get_reveal_steps(diffout['x_save'])
+            reveal_mask = th.arange(diffout['p_save'].shape[1], device=seqs.device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
+            diffout['aa_entropy'], diffout['pep_entropy'] = self.calculate_entropy_prob(diffout['p_save'], reveal_mask, slmask)
+        
+        # Find winners
+        if n == 1:
+            winners = th.arange(batch_size)
+        else:
+            winners = find_winners(
+                seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
+            )
+        
+        # Select winners and reshape
+        reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
+        top_sequences = reshape(seqs[winners])
+        logits = reshape(logits[winners])
+        additional_outputs = {x: reshape(y[winners]) for x, y in diffout.items()}
+
+        return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
+        return return_
+
+
+class Seq2SeqD3PM(Seq2Seq):
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+            **kwargs,
+        )
+        # Decoder model
+        default_kv_indim = encoder_config.get('running_units')
+        if self.encoder is not None:
+            default_kv_indim = self.encoder.run_units
+        decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
+        self.decoder = MDLMDecoder(
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            **decoder_config,
+        )
+        # Diffusion object
+        self.diff_obj = D3PMDiffusion(diff_config, self.decoder.outdict, self.decoder)
         self.decoder.diff_obj = self.diff_obj
 
         self.ens_size = ensemble_config['ensemble_n']

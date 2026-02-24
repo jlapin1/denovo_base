@@ -13,13 +13,28 @@ import os
 import torch.distributed as dist
 
 
+def _coerce_override_value(raw_value: str):
+    value = yaml.safe_load(raw_value)
+    if isinstance(value, str):
+        raw = raw_value.strip()
+        # Some sweep backends emit scientific notation (e.g. 8e-05) that
+        # yaml.safe_load may keep as a string; coerce these to float.
+        sci_notation = r"[+-]?(?:\d+\.?\d*|\.\d+)[eE][+-]?\d+"
+        if value == raw and re.fullmatch(sci_notation, raw):
+            try:
+                return float(raw)
+            except ValueError:
+                pass
+    return value
+
+
 def _parse_overrides(argv):
     overrides = []
     for arg in argv:
         if "=" not in arg:
             raise ValueError(f"Override '{arg}' must be in key=value form.")
         key, val = arg.split("=", 1)
-        overrides.append((key, yaml.safe_load(val)))
+        overrides.append((key, _coerce_override_value(val)))
     return overrides
 
 
