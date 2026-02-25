@@ -295,6 +295,7 @@ class Seq2SeqMDLM(Seq2Seq):
         )
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
+        decoder_config['embed_type'] = 'preembed' if diff_config['time_conditioning'] else None
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,
@@ -401,6 +402,7 @@ class Seq2SeqD3PM(Seq2Seq):
         # Decoder model
         decoder_config['kv_indim'] = self.encoder.run_units
         decoder_config['wavelength_bounds'] = (1, 5*diff_config['steps'])
+        decoder_config['embed_type'] = 'preembed'
         self.decoder = D3PMDecoder(
             token_dict = token_dict,
             decoder_config = decoder_config,

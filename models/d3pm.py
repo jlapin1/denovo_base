@@ -205,7 +205,7 @@ class D3PM:
         if save_p:
             p_save = torch.empty(self.n_T-1, *x.shape, self.num_classes)
         
-        pbar = tqdm(reversed(range(1, self.n_T)), total=self.n_T-1) if progress else enumerate(reversed(range(1, self.n_T)))
+        pbar = tqdm(reversed(range(1, self.n_T)), total=self.n_T-1) if progress else reversed(range(1, self.n_T))
         for T, t in enumerate(pbar):
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x, logits = self.p_sample(
