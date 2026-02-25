@@ -183,7 +183,7 @@ decoder_mdlm:
     T: 0
     subs_masking: False
     parameterization: subs
-    time_conditioning: True
+    time_conditioning: False
     sampling:
       predictor: ddpm_cache
       steps: 4

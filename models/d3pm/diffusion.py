@@ -293,6 +293,7 @@ def d3pm_training_loss(
     token_mask: Optional[torch.Tensor],
     self_condition: bool,
     block_training: bool,
+    time_conditioning: bool,
 ) -> Dict[str, torch.Tensor]:
     bsz, seq_len = x0.shape
     t = torch.randint(low=0, high=num_steps, size=(bsz,), device=x0.device)
@@ -308,7 +309,7 @@ def d3pm_training_loss(
 
     local_kwargs = dict(model_kwargs)
     t_norm = t.float() / max(num_steps - 1, 1)
-    local_kwargs["timesteps"] = t_norm
+    local_kwargs["timesteps"] = t_norm if time_conditioning else torch.zeros_like(t_norm)
 
     if self_condition:
         local_kwargs["self_conditions"] = torch.zeros(
@@ -385,11 +386,12 @@ def p_sample_step_d3pm(
     model_prediction: str,
     eps: float,
     self_condition: bool,
+    time_conditioning: bool,
     top: Optional[int] = None,
 ) -> Dict[str, torch.Tensor]:
     local_kwargs = dict(model_kwargs)
     t_norm = t.float() / max(num_steps - 1, 1)
-    local_kwargs["timesteps"] = t_norm
+    local_kwargs["timesteps"] = t_norm if time_conditioning else torch.zeros_like(t_norm)
 
     if self_condition and "self_conditions" not in local_kwargs:
         local_kwargs["self_conditions"] = torch.zeros(
@@ -443,6 +445,7 @@ def sample_loop_d3pm(
     model_prediction: str,
     eps: float,
     self_condition: bool,
+    time_conditioning: bool,
     seq_len: int,
     batch_size: int,
     top: Optional[int],
@@ -525,6 +528,7 @@ def sample_loop_d3pm(
             model_prediction=model_prediction,
             eps=eps,
             self_condition=self_condition,
+            time_conditioning=time_conditioning,
             top=top,
         )
         x = step_out["x_prev"]
@@ -561,6 +565,7 @@ class D3PMDiffusion:
         self.loss_type = config.get("loss_type", "hybrid")
         self.hybrid_coeff = float(config.get("hybrid_coeff", 1e-3))
         self.num_steps = int(config["T"])
+        self.time_conditioning = bool(config.get("time_conditioning", True))
 
         transition_cfg = dict(config.get("transition", {}))
         if "type" not in transition_cfg:
@@ -618,6 +623,7 @@ class D3PMDiffusion:
                 self.config.get("model", {}).get("self_condition", True)
             ),
             block_training=block_training,
+            time_conditioning=self.time_conditioning,
         )
 
     @torch.no_grad()
@@ -668,6 +674,7 @@ class D3PMDiffusion:
             self_condition=bool(
                 self.config.get("model", {}).get("self_condition", True)
             ),
+            time_conditioning=self.time_conditioning,
             seq_len=seq_len,
             batch_size=batch_size,
             top=top,

@@ -93,6 +93,20 @@ def mass_objects(masses_path, output_dictionary):
     masses_array = th.tensor([m[1] for m in sorted(int2mass.items())])
     return str2mass, int2mass, masses_array
 
+
+def _resolve_time_conditioning_and_embed_type(diff_config, decoder_tag):
+    time_conditioning = bool(diff_config.get('time_conditioning', True))
+    embed_type = diff_config.get('model', {}).get('embed_type', None)
+    if time_conditioning and embed_type is None:
+        raise ValueError(
+            f"{decoder_tag}: diffusion_config.time_conditioning=True requires "
+            "diffusion_config.model.embed_type to be set in yaml "
+            "(e.g. 'normembed' or 'preembed')."
+        )
+    if not time_conditioning:
+        return False, None
+    return True, embed_type
+
 class Seq2Seq(nn.Module):
     def __init__(
         self,
@@ -355,9 +369,11 @@ class Seq2SeqMDLM(Seq2Seq):
         decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
         decoder_config['kv_indim'] = decoder_kv_indim
         self.configure_precomputed_encoder(decoder_kv_indim)
+        _, embed_type = _resolve_time_conditioning_and_embed_type(diff_config, "MDLM")
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,
+            embed_type          = embed_type,
             **decoder_config,
         )
         # Diffusion object
@@ -467,9 +483,11 @@ class Seq2SeqD3PM(Seq2Seq):
         decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
         decoder_config['kv_indim'] = decoder_kv_indim
         self.configure_precomputed_encoder(decoder_kv_indim)
+        _, embed_type = _resolve_time_conditioning_and_embed_type(diff_config, "D3PM")
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,
+            embed_type          = embed_type,
             **decoder_config,
         )
         # Diffusion object

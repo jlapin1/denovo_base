@@ -189,7 +189,7 @@ decoder_mdlm:
     T: 0
     subs_masking: False
     parameterization: subs
-    time_conditioning: True
+    time_conditioning: False
     sampling:
       predictor: ddpm_cache
       steps: 4
@@ -218,6 +218,7 @@ decoder_mdlm:
 decoder_d3pm:
   diffusion_config:
     T: 256
+    time_conditioning: True
     eps: 1.0e-6
     model_prediction: x0
     loss_type: hybrid # kl | cross_entropy_x0 | hybrid
@@ -237,6 +238,7 @@ decoder_d3pm:
     model:
       length: 15
       self_condition: True
+      embed_type: normembed
 
 ############################
 # Classifier for diffusion #
