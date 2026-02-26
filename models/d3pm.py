@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import numpy as np
+from tqdm import tqdm
 
 class D3PM:
     def __init__(
@@ -156,7 +157,7 @@ class D3PM:
             model_kwargs['self_conditions'] = torch.zeros(x_t.shape[0], x_t.shape[1], self.num_classes, device=x.device)
             if np.random.uniform() > 0.5:
                 with torch.no_grad():
-                    model_output = self.model_predict(x_t, t, **model_kwargs)
+                    model_output = self.model_predict(x_t, t, model_kwargs)
                 model_kwargs['self_conditions'] = model_output.detach()
 
         predicted_x0_logits = self.model_predict(x_t, t, model_kwargs)
@@ -195,7 +196,7 @@ class D3PM:
     def _sample(self, x, model_kwargs={}, save_x=False, save_p=False, progress=False, **kwargs):
         
         if save_x:
-            x_save = torch.empty(self.n_T-1, *x.shape)
+            x_save = torch.empty(self.n_T, *x.shape, dtype=torch.int32)
             x_save[0] = x
 
         if self.x0_model.self_condition:
@@ -203,8 +204,9 @@ class D3PM:
         
         if save_p:
             p_save = torch.empty(self.n_T-1, *x.shape, self.num_classes)
-
-        for T, t in enumerate(reversed(range(1, self.n_T))):
+        
+        pbar = tqdm(reversed(range(1, self.n_T)), total=self.n_T-1) if progress else reversed(range(1, self.n_T))
+        for T, t in enumerate(pbar):
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x, logits = self.p_sample(
                 x, t, model_kwargs, torch.rand((*x.shape, self.num_classes), device=x.device)
@@ -216,11 +218,11 @@ class D3PM:
             if save_x:
                 x_save[T+1] = x
             if save_p:
-                p_save[T+1] = logits
+                p_save[T] = logits
 
-        output = {'x': x, 'logits': logits}
-        if save_x: output['x_save'] = x_save
-        if save_p: output['p_save'] = p_save
+        output = {'prediction': x, 'logits': logits}
+        if save_x: output['x_save'] = x_save.transpose(0,1)
+        if save_p: output['p_save'] = p_save.transpose(0,1)
         return output
 
     def sample_with_image_sequence(self, x, cond=None, stride=10):

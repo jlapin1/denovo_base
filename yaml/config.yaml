@@ -44,7 +44,7 @@ loader:
   train_name: train
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
   val_name: val
-  datapath_extension: parquet/hela
+  datapath_extension: parquet/pt
   masses_path: /cmnfs/data/proteomics/foundational_model/MKB2
   dictionary_path: /cmnfs/data/proteomics/foundational_model/MKB2/dictionary.tsv
   synonyms:
@@ -182,7 +182,7 @@ decoder_mdlm:
     T: 0
     subs_masking: False
     parameterization: subs
-    custom_loss: False
+    custom_loss: True
     time_conditioning: True
     sampling:
       predictor: ddpm_cache
