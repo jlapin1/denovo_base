@@ -484,8 +484,9 @@ def sample_loop_d3pm(
         and steps_override > 0
         and steps_override != num_steps
     ):
-        # ref repo google-images samples all T steps. Divergence: we allow coarse schedules
-        # for faster local runs by subsampling reverse steps.
+        # ref repo google-images supports fewer eval steps via num_timesteps, but
+        # does a prefix truncation of the reverse chain (no sparse respacing).
+        # Divergence: we allow sparse linspace subsampling of reverse steps.
         idx = (
             torch.linspace(0, len(full_schedule) - 1, steps=steps_override)
             .round()

@@ -179,7 +179,16 @@ class SelfAttention(BaseAttentionLayer):
 
         return Q, K, V  # bs*h, sl, d
 
-    def forward(self, x, mask=None, biastsr=None, k=None, v=None, return_full=False):
+    def forward(
+        self,
+        x,
+        mask=None,
+        biastsr=None,
+        k=None,
+        v=None,
+        return_full=False,
+        return_branch=False,
+    ):
         bs, sl, units = x.shape
         q = self.wq(x)  # bs, sl, d*h
         if k == None:
@@ -213,14 +222,19 @@ class SelfAttention(BaseAttentionLayer):
         resid = self.Wo(att)
 
         if self.alphabet:
-            output = self.alpha * self.shortcut(x) + self.beta * self.drop(resid)
+            branch = self.beta * self.drop(resid)
+            output = self.alpha * self.shortcut(x) + branch
         else:
-            output = self.shortcut(x) + self.drop(resid)
+            branch = self.drop(resid)
+            output = self.shortcut(x) + branch
+
+        if return_branch:
+            output = branch
 
         # other = [Q, K, V] + other + [resid] if return_full else None
         kv_cache = {"k": k, "v": v}
 
-        return {"out": output, "kv_cache": kv_cache}
+        return {"out": output, "kv_cache": kv_cache, "other": other}
 
 
 class CrossAttention(BaseAttentionLayer):
@@ -266,13 +280,20 @@ class CrossAttention(BaseAttentionLayer):
 
 class FFN(nn.Module):
     def __init__(
-        self, indim, unit_multiplier=1, out_units=None, dropout=0, alphabet=False
+        self,
+        indim,
+        unit_multiplier=1,
+        out_units=None,
+        dropout=0,
+        alphabet=False,
+        activation="relu",
     ):
         super(FFN, self).__init__()
         self.indim = indim
         self.mult = unit_multiplier
         self.out_units = indim if out_units == None else out_units
         self.alphabet = alphabet
+        self.activation_name = activation
 
         self.W1 = nn.Linear(indim, indim * self.mult)
         self.W2 = nn.Linear(indim * self.mult, self.out_units, bias=False)
@@ -287,17 +308,30 @@ class FFN(nn.Module):
             self.alpha = nn.Parameter(th.tensor(1.0), requires_grad=True)
             self.beta = nn.Parameter(th.tensor(1.0), requires_grad=True)
 
-    def forward(self, x, embed=None, return_full=False):
+    def forward(self, x, embed=None, return_full=False, return_branch=False):
         out1 = self.W1(x)
-        out2 = th.relu(out1 + (0 if embed == None else embed))
+        pre_act = out1 + (0 if embed == None else embed)
+        if self.activation_name == "relu":
+            out2 = th.relu(pre_act)
+        elif self.activation_name in ("gelu", "gelu_tanh"):
+            out2 = th.nn.functional.gelu(pre_act, approximate="tanh")
+        else:
+            raise NotImplementedError(
+                f"Unknown FFN activation '{self.activation_name}'."
+            )
         out3 = self.W2(out2)
 
         other = [out1, out3] if return_full else None
 
         if self.alphabet:
-            out = self.alpha * x + self.beta * self.drop(out3)
+            branch = self.beta * self.drop(out3)
+            out = self.alpha * x + branch
         else:
-            out = x + self.drop(out3)
+            branch = self.drop(out3)
+            out = x + branch
+
+        if return_branch:
+            out = branch
 
         return {"out": out, "other": other}
 
@@ -309,7 +343,7 @@ class TransBlock(nn.Module):
         ffn_dict,
         norm_type="layer",
         prenorm=True,
-        embed_type=None,  # preembed | ffnembed | normembed | None
+        embed_type=None,  # preembed | ffnembed | normembed | adaLN | None
         embed_indim=256,
         is_cross=False,
         kvindim=256,
@@ -335,15 +369,26 @@ class TransBlock(nn.Module):
             elif embed_type == "normembed":
                 units = 2 * units
                 elementwise_affine = False
+            elif embed_type == "adaLN":
+                if not prenorm:
+                    raise ValueError("embed_type='adaLN' requires prenorm=True.")
+                units = 6 * units
+                elementwise_affine = False
             else:
                 raise NotImplementedError("Choose a real embedding option")
 
             assert type(embed_indim) == int
             self.embed = nn.Linear(embed_indim, units)
+            if embed_type == "adaLN":
+                nn.init.zeros_(self.embed.weight)
+                nn.init.zeros_(self.embed.bias)
 
         indim = attention_dict["indim"]
         self.norm1 = norm(indim, elementwise_affine=elementwise_affine)
-        self.norm2 = norm(ffn_dict["indim"])
+        if embed_type == "adaLN":
+            self.norm2 = norm(ffn_dict["indim"], elementwise_affine=False)
+        else:
+            self.norm2 = norm(ffn_dict["indim"])
         self.selfattention = SelfAttention(**attention_dict)
         if is_cross:
             cross_dict = attention_dict.copy()
@@ -354,7 +399,10 @@ class TransBlock(nn.Module):
             cross_dict["kvindim"] = kvindim
             self.crossnorm = norm(indim)
             self.crossattention = CrossAttention(**cross_dict)
-        self.ffn = FFN(**ffn_dict)
+        ffn_kwargs = ffn_dict.copy()
+        if embed_type == "adaLN":
+            ffn_kwargs["activation"] = "gelu_tanh"
+        self.ffn = FFN(**ffn_kwargs)
 
     def forward(
         self,
@@ -374,7 +422,10 @@ class TransBlock(nn.Module):
         out = x
         # Embed precursor level information (?)
         if self.embed_type is not None:
-            Emb = self.embed(embed_feats)[:, None, :]
+            if self.embed_type == "adaLN":
+                Emb = self.embed(th.nn.functional.silu(embed_feats))[:, None, :]
+            else:
+                Emb = self.embed(embed_feats)[:, None, :]
 
             if self.embed_type == "preembed":
                 out = out + self.alpha * Emb
@@ -388,6 +439,38 @@ class TransBlock(nn.Module):
                 bias = bias
                 if self.prenorm:
                     out = weight * self.norm1(out) + bias
+            elif self.embed_type == "adaLN":
+                shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+                    Emb.chunk(6, dim=-1)
+                )
+                sa_in = (1 + scale_msa) * self.norm1(out) + shift_msa
+                outsa = self.selfattention(
+                    sa_in,
+                    selfmask,
+                    biastsr,
+                    k=sa_cache_k,
+                    v=sa_cache_v,
+                    return_full=return_full,
+                    return_branch=True,
+                )
+                out = out + gate_msa * outsa["out"]
+
+                if self.is_cross:
+                    cross_out = self.crossattention(
+                        self.crossnorm(out), kv_feats, spec_mask
+                    )
+                    out = cross_out
+
+                ffn_in = (1 + scale_mlp) * self.norm2(out) + shift_mlp
+                outffn = self.ffn(
+                    ffn_in, None, return_full=return_full, return_branch=True
+                )
+                out = out + gate_mlp * outffn["out"]
+
+                other = (
+                    outsa["other"] + outffn["other"] + [out] if return_full else None
+                )
+                return {"out": out, "other": other, "kv_cache": outsa["kv_cache"]}
         else:
             if self.prenorm:
                 out = self.norm1(out)

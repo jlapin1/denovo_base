@@ -35,7 +35,7 @@ def init_decoder_weights(module):
         module.W2.weight = I.normal_(module.W2.weight, 0.0, (1/3)*(module.indim*module.mult)**-0.5)
         #module.W2.weight = I.xavier_uniform_(module.W2.weight)
     elif isinstance(module, mp.TransBlock):
-        if hasattr(module, 'embed') and module.embed_type == 'normembed':
+        if hasattr(module, 'embed') and module.embed_type in ('normembed', 'adaLN'):
             module.embed.weight = I.zeros_(module.embed.weight)
             module.embed.bias = I.zeros_(module.embed.bias)
     elif isinstance(module, nn.Linear):

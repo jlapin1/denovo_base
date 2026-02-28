@@ -6,3 +6,4 @@ slurm_outs/*
 .cache/
 local_data/
 .DS_Store
+.vscode/settings.json

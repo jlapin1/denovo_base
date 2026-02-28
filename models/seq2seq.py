@@ -101,7 +101,7 @@ def _resolve_time_conditioning_and_embed_type(diff_config, decoder_tag):
         raise ValueError(
             f"{decoder_tag}: diffusion_config.time_conditioning=True requires "
             "diffusion_config.model.embed_type to be set in yaml "
-            "(e.g. 'normembed' or 'preembed')."
+            "(e.g. 'adaLN', 'normembed', or 'preembed')."
         )
     if not time_conditioning:
         return False, None
