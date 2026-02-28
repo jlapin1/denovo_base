@@ -121,6 +121,27 @@ def _at_onehot(a: torch.Tensor, t: torch.Tensor, x_probs: torch.Tensor) -> torch
     return torch.einsum("blk,bkd->bld", x_probs, a_t)
 
 
+def _q_transition_s_to_t(
+    q_one_step: torch.Tensor, s: int, t: int
+) -> torch.Tensor:
+    """Compute q(x_t | x_s) transition matrix for any s <= t.
+
+    This is used for jump-aware sampling on sparse timestep grids. For adjacent
+    steps (s=t-1), this reduces to q_one_step[t].
+    """
+    if s > t:
+        raise ValueError(f"Expected s <= t, got s={s}, t={t}.")
+
+    num_classes = q_one_step.shape[-1]
+    if s == t:
+        return torch.eye(num_classes, dtype=q_one_step.dtype, device=q_one_step.device)
+
+    out = torch.eye(num_classes, dtype=q_one_step.dtype, device=q_one_step.device)
+    for i in range(s + 1, t + 1):
+        out = out @ q_one_step[i]
+    return out
+
+
 def q_sample_xt_given_x0(
     x0: torch.Tensor,
     t: torch.Tensor,
@@ -172,6 +193,40 @@ def q_posterior_xtm1_given_xt_x0(
     # ref repo cloneofsimo uses t==1 branch due 1-based indexing; we standardize on 0-based.
     t_broadcast = t.view(xt.shape[0], *([1] * xt.ndim))
     return torch.where(t_broadcast == 0, t_zero_logits, out)
+
+
+def q_posterior_xs_given_xt_x0(
+    x0_or_x0_logits: torch.Tensor,
+    xt: torch.Tensor,
+    *,
+    s: int,
+    t: int,
+    q_s_to_t_transposed: torch.Tensor,
+    q_cumulative: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    # Jump posterior used by sparse respacing: q(x_s | x_t, x0) for s < t.
+    # Keep this separate from q_posterior_xtm1_given_xt_x0 to make reduced-step
+    # sampling logic explicit and avoid mixing one-step and jump-step math.
+    num_classes = q_cumulative.shape[-1]
+
+    # q(x_t | x_s): gather column-conditioned probabilities using transpose.
+    fact1 = q_s_to_t_transposed[xt]
+
+    if x0_or_x0_logits.dtype in (torch.int32, torch.int64):
+        x0_logits = torch.log(F.one_hot(x0_or_x0_logits, num_classes).float() + eps)
+        fact2 = q_cumulative[s, x0_or_x0_logits, :]
+        s_zero_logits = x0_logits
+    else:
+        x0_logits = x0_or_x0_logits
+        x0_probs = torch.softmax(x0_logits, dim=-1)
+        fact2 = torch.einsum("blk,kd->bld", x0_probs, q_cumulative[s])
+        s_zero_logits = x0_logits
+
+    out = torch.log(fact1 + eps) + torch.log(fact2 + eps)
+    if s == 0:
+        return s_zero_logits
+    return out
 
 
 def model_logits_to_p_logits(
@@ -379,7 +434,9 @@ def p_sample_step_d3pm(
     backbone,
     xt: torch.Tensor,
     t: torch.Tensor,
+    s: int,
     model_kwargs: Dict,
+    q_one_step: torch.Tensor,
     q_one_step_transposed: torch.Tensor,
     q_cumulative: torch.Tensor,
     num_steps: int,
@@ -399,15 +456,34 @@ def p_sample_step_d3pm(
         )
 
     model_output = backbone(xt, **local_kwargs)["out"]
-    model_logits, pred_x0_logits = model_logits_to_p_logits(
-        model_output,
-        xt,
-        t,
-        mode=model_prediction,
-        q_one_step_transposed=q_one_step_transposed,
-        q_cumulative=q_cumulative,
-        eps=eps,
-    )
+    if model_prediction == "x0":
+        # ref repo google-images/cloneofsimo use one-step posterior in ancestral
+        # full schedules. Divergence: sparse respacing here uses jump posterior
+        # q(x_s | x_t, x0) for mathematically consistent coarse sampling.
+        if not torch.all(t == t[0]):
+            raise ValueError("Sampling expects a single timestep across the batch.")
+        t_scalar = int(t[0].item())
+        q_s_to_t = _q_transition_s_to_t(q_one_step, s=s, t=t_scalar)
+        model_logits = q_posterior_xs_given_xt_x0(
+            model_output,
+            xt,
+            s=s,
+            t=t_scalar,
+            q_s_to_t_transposed=q_s_to_t.transpose(0, 1),
+            q_cumulative=q_cumulative,
+            eps=eps,
+        )
+        pred_x0_logits = model_output
+    else:
+        model_logits, pred_x0_logits = model_logits_to_p_logits(
+            model_output,
+            xt,
+            t,
+            mode=model_prediction,
+            q_one_step_transposed=q_one_step_transposed,
+            q_cumulative=q_cumulative,
+            eps=eps,
+        )
 
     noise = torch.rand_like(model_logits).clamp(min=eps, max=1.0)
     gumbel_noise = -torch.log(-torch.log(noise))
@@ -439,6 +515,7 @@ def sample_loop_d3pm(
     *,
     backbone,
     model_kwargs: Dict,
+    q_one_step: torch.Tensor,
     q_one_step_transposed: torch.Tensor,
     q_cumulative: torch.Tensor,
     num_steps: int,
@@ -517,12 +594,15 @@ def sample_loop_d3pm(
     for i in pbar:
         t_scalar = timesteps[i]
         t = torch.full((batch_size,), t_scalar, dtype=torch.long, device=x.device)
+        s_scalar = timesteps[i + 1] if i + 1 < len(timesteps) else 0
 
         step_out = p_sample_step_d3pm(
             backbone=backbone,
             xt=x,
             t=t,
+            s=s_scalar,
             model_kwargs=model_kwargs,
+            q_one_step=q_one_step,
             q_one_step_transposed=q_one_step_transposed,
             q_cumulative=q_cumulative,
             num_steps=num_steps,
@@ -640,7 +720,7 @@ class D3PMDiffusion:
         progress=False,
     ):
         del eps
-        q_t_T, q_bar, _ = self._q_on_device(self.device)
+        q_t_T, q_bar, q_t = self._q_on_device(self.device)
         sample_steps = (
             self.default_sampling_steps if num_steps is None else int(num_steps)
         )
@@ -667,6 +747,7 @@ class D3PMDiffusion:
         return sample_loop_d3pm(
             backbone=self.backbone,
             model_kwargs=local_kwargs,
+            q_one_step=q_t,
             q_one_step_transposed=q_t_T,
             q_cumulative=q_bar,
             num_steps=self.num_steps,
