@@ -1059,7 +1059,7 @@ class DenovoD3PMObj(BaseDenovo):
         return losses
     
     def log_wandb(self, losses, grad_norm):
-        loss = losses.pop('loss').detach().cpu().item()
+        loss = losses.pop('loss')
         wandb.log({
             "Total loss": loss,
             'Global step': self.global_step,

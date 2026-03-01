@@ -2,6 +2,7 @@ import torch
 from torch import nn
 import numpy as np
 from tqdm import tqdm
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class D3PM:
     def __init__(
@@ -53,8 +54,8 @@ class D3PM:
         self.logit_type = "logit"
 
         # register
-        self.q_one_step_transposed = q_one_step_transposed
-        self.q_mats = q_mats
+        self.q_one_step_transposed = q_one_step_transposed.to(device)
+        self.q_mats = q_mats.to(device)
 
         assert self.q_mats.shape == (
             self.n_T,
