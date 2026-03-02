@@ -702,12 +702,12 @@ class Diffusion:
            
           if save_p: 
               psave[i] = p_x0_cache
-          if (not torch.allclose(x_next, x) or self.time_conditioning):
+          if True:#(not torch.allclose(x_next, x) or self.time_conditioning):
               # Disable caching
               p_x0_cache = None
               x = x_next
-          else:
-              x = self._analytic_update(x, t, dt)
+          #else:
+          #    x = self._analytic_update(x, t, dt)
           if save_x: 
               xsave[i+1] = x
       
