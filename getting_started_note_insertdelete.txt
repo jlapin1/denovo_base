@@ -1,0 +1,124 @@
+Insert/Delete Real-Scale Training and Sweep Note
+================================================
+
+Scope
+-----
+This note is for moving insert/delete diffusion from local dev runs to cluster-scale training and hyperparameter/schedule sweeps on real datasets.
+
+Current baseline config
+-----------------------
+File: yaml/config_insertdelete.yaml
+
+Already updated from config_mps (hyperparameters only):
+- epochs: 200
+- lr_warmup_end: 1.5e-3
+- lr_warmup_steps: 100
+- lr_flat_steps: 1680
+- lr_decay_steps: 2000
+- decoder_insertdelete.diffusion_config.T: 256
+- decoder_insertdelete.diffusion_config.sampling.steps: 256
+- decoder_insertdelete schedule:
+  - transition_type: mask
+  - insert_type: mask
+  - final_refresh_prob: 1e-4
+  - deny_insert_tokens: [X, <INS>, <DEL>]
+
+Intentionally kept as real-data settings:
+- loader paths (9_species_V2, real dictionary/masses files)
+- pep_length: [0, 40]
+- decoder_insertdelete.diffusion_config.model.length: 41
+- no precomputed encoder fields in this config
+
+
+1) Data plumbing for real sweeps
+--------------------------------
+1. Build a 10% pilot training dataset copy (recommended) and point:
+   - loader.train_dataset_path -> pilot path
+   - keep val on full/representative split if possible
+2. Keep real vocab/dictionary:
+   - loader.dictionary_path must match masses_path + tokenization used at train/eval.
+3. Do not enable precomputed encoder path for real insert/delete runs:
+   - do not add loader.use_precomputed_encoder=true
+   - do not set encoder_arrays_path/precomputed_encoder_dim in this config
+4. Keep val_steps moderate during sweeps (e.g. 50-200) for faster iteration.
+
+
+2) Runtime/distributed plumbing
+-------------------------------
+1. Use torchrun for DDP:
+   - torchrun --nproc_per_node=<gpus> main.py yaml/config_insertdelete.yaml ...
+2. Tune dataloader workers for cluster IO:
+   - loader.num_workers
+   - loader.val_num_workers
+3. Keep batch_size as per-GPU batch size; adjust by GPU memory.
+4. If running on CPU-only preflight nodes, set:
+   - NUMBA_CACHE_DIR and HF_DATASETS_CACHE to writable paths.
+
+
+3) Eval/checkpoint semantics (important)
+----------------------------------------
+1. eval_frequency is time-based (seconds), not steps.
+   - If eval_frequency is null: eval runs every epoch.
+2. save_last_freq is step-based (global steps).
+   - Large value means "almost never save last".
+3. For long sweeps, set:
+   - save_weights=true
+   - eval_frequency to a reasonable wall-clock interval (e.g. 1800-5400 seconds).
+
+
+4) Recommended sweep strategy
+-----------------------------
+Stage A: General optimization sweep on 10% pilot data (fixed schedule)
+1. Fix schedule:
+   - transition_type=mask
+   - insert_type=mask
+   - final_refresh_prob=1e-4
+2. Sweep:
+   - lr_warmup_end: [3e-4, 6e-4, 1e-3, 1.5e-3]
+   - lr_warmup_steps: [100, 500, 1000]
+   - batch_size: [256, 512] (if memory allows)
+
+Stage B: Schedule sweep (after stable LR found)
+1. Sweep:
+   - transition_type: [mask, delayed_mask, uniform]
+   - insert_type: [mask, uniform]
+   - final_refresh_prob: [1e-5, 1e-4, 1e-3, 1e-2]
+   - acceleration: [4, 8, 12]
+2. Keep:
+   - T fixed initially (256)
+   - sampling.steps == T (required by current insert/delete implementation)
+
+Stage C: Scale-up confirm on full dataset
+1. Re-run top configs from Stage A/B on full train split.
+2. Increase eval window and checkpoint cadence for long runs.
+
+
+5) Metrics to monitor during sweeps
+-----------------------------------
+Primary:
+- aa_recall
+- aa_precision
+- peptide
+- ce
+
+Diagnostics:
+- training "Total loss"
+- "Global grad norm"
+- watch for precision NaN events (often denominator=0 in early/failed runs)
+
+
+6) Command templates
+--------------------
+Single pilot run:
+python main.py yaml/config_insertdelete.yaml \
+  decoder_name=insertdelete \
+  loader.train_dataset_path=/path/to/pilot10pct \
+  loader.val_dataset_path=/path/to/val \
+  eval_frequency=1800
+
+Cluster DDP run:
+torchrun --nproc_per_node=8 main.py yaml/config_insertdelete.yaml \
+  decoder_name=insertdelete \
+  loader.train_dataset_path=/path/to/pilot10pct \
+  eval_frequency=1800
+

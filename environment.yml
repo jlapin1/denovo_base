@@ -1,0 +1,35 @@
+name: DiffuEnv
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - numpy>=1.23
+  # Avoid two OpenMP runtimes problem on macOS.
+  - libopenblas=*=*pthreads*
+  - scipy
+  - pandas
+  - scikit-learn
+  - pyarrow>=12,<16
+  - pyteomics>=4.6
+  - sortedcontainers
+  - einops
+  - spectrum_utils
+  - tqdm
+  - matplotlib
+  - datasets
+  - fsspec
+  # Vendored google_d3pm_ins_del deps.
+  - jax
+  - jaxlib
+  - flax
+  - pip
+  - pip:
+      - torch==2.9.1
+      - torchvision
+      - lightning==2.6.0
+      - wandb>=0.12.10
+      - jiwer
+      - pylance>=1.0.2
+      - path
+      - gin-config

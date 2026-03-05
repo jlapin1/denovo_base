@@ -5,3 +5,6 @@ slurm_outs/*
 .vscode/launch.json
 .cache/
 local_data/
+.DS_Store
+.vscode/settings.json
+notes/notebook_artifacts/*

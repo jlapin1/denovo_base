@@ -35,7 +35,7 @@ def init_decoder_weights(module):
         module.W2.weight = I.normal_(module.W2.weight, 0.0, (1/3)*(module.indim*module.mult)**-0.5)
         #module.W2.weight = I.xavier_uniform_(module.W2.weight)
     elif isinstance(module, mp.TransBlock):
-        if hasattr(module, 'embed') and module.embed_type == 'normembed':
+        if hasattr(module, 'embed') and module.embed_type in ('normembed', 'adaLN'):
             module.embed.weight = I.zeros_(module.embed.weight)
             module.embed.bias = I.zeros_(module.embed.bias)
     elif isinstance(module, nn.Linear):
@@ -441,6 +441,7 @@ class MDLMDecoder(base_diffusion_decoder):
         use_mass=False,
         use_leftover=False,
         prenorm=False,
+        embed_type=None,
         self_condition=True,
         output_sigma=False,
         clip_denoised=False,
@@ -456,7 +457,7 @@ class MDLMDecoder(base_diffusion_decoder):
             ffn_multiplier=ffn_multiplier,
             alphabet=alphabet,
             prenorm=prenorm,
-            embed_type=None,
+            embed_type=embed_type,
             depth=depth,
             timestep_dimension=timestep_dimension,
             kv_input_dimension=decoder_config['kv_indim'],
@@ -471,16 +472,12 @@ class MDLMDecoder(base_diffusion_decoder):
 
         self.max_sl = decoder_config['sequence_length'] # + 1
 
-        # Timestep embedding (optional)
-        self.use_time_embed = bool(kwargs.get('use_time_embed', False))
-        if self.use_time_embed:
-            self.time_embed = nn.Sequential(
-                nn.Linear(timestep_dimension, timestep_dimension),
-                nn.SiLU(),
-                nn.Linear(timestep_dimension, timestep_dimension),
-            )
-        else:
-            self.time_embed = None
+        # Timestep embedding
+        self.time_embed = nn.Sequential(
+            nn.Linear(timestep_dimension, timestep_dimension),
+            nn.SiLU(),
+            nn.Linear(timestep_dimension, timestep_dimension),
+        )
         
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
@@ -534,11 +531,10 @@ class MDLMDecoder(base_diffusion_decoder):
         seqmask=None,
         self_conditions=None,
         doubled=False,
+        return_hidden=False,
     ):
         # Timestep
-        time_emb = None
-        if self.time_embed is not None:
-            time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
+        time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
 
         # Beginning
         seq_emb = self.embed_sequence(x)
@@ -558,12 +554,17 @@ class MDLMDecoder(base_diffusion_decoder):
         )
         cache = out['kv_cache']
         out = out['out']
+        hidden = out
 
         # End
         out = self.proj_end(out)
         out = self.RemovePrecursorToken(out)
+        hidden = self.RemovePrecursorToken(hidden)
 
-        return {'out': out, 'sa_cache': cache}
+        output = {'out': out, 'sa_cache': cache}
+        if return_hidden:
+            output['hidden'] = hidden
+        return output
     
     def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
         bs = embedding.shape[0]
