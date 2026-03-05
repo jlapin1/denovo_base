@@ -7,3 +7,4 @@ slurm_outs/*
 local_data/
 .DS_Store
 .vscode/settings.json
+notes/notebook_artifacts/*

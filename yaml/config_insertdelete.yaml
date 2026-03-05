@@ -3,7 +3,7 @@ inference: False
 batch_size: 512
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 100
+epochs: 200
 
 #################
 # Learning rate #
@@ -11,13 +11,13 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 1.0e-4 # phase 2 LR
-lr_warmup_steps: 20000 #20000
+lr_warmup_end: 1.5e-3 # phase 2 LR
+lr_warmup_steps: 100 #20000
 # Phase 2 - Flat
-lr_flat_steps: 266000 #266000
+lr_flat_steps: 1680 #266000
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 1000000 # 1000000
+lr_decay_steps: 2000 # 1000000
 
 ############################
 # Loading, logging, saving #
@@ -237,26 +237,23 @@ decoder_d3pm:
 
 decoder_insertdelete:
   diffusion_config:
-    T: 128
+    T: 256
     time_conditioning: True
     model_prediction: x0 # x0 | direct
     seed: 0
     sampling:
-      steps: 128
+      steps: 256
       top: 1
     schedule:
-      transition_type: uniform # text8_nn | mask | delayed_mask | uniform | pseudogaussian
-      insert_type: uniform # uniform | mask
+      transition_type: mask # text8_nn | mask | delayed_mask | uniform | pseudogaussian
+      insert_type: mask # uniform | mask
       final_relative_size: 1.0
-      final_refresh_prob: 0.01 # near-D3PM regime: very low insert/delete refresh
+      final_refresh_prob: 0.0001 # near-D3PM regime: very low insert/delete refresh
       initial_slope: 1.0
       acceleration: 8.0
-      deny_insert_eos: True
       max_rejects: 16
       deny_insert_tokens:
         - X
-        - <SOS>
-        - <MASK>
         - <INS>
         - <DEL>
     loss_weights:

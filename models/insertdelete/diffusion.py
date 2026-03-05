@@ -71,7 +71,18 @@ class InsertDeleteDiffusion:
             )
         self.max_len = int(config["model"]["length"])
 
-        self.bridge = InsertDeleteTorchJaxBridge(dictionary, max_len=self.max_len)
+        schedule_cfg = config.get("schedule", {})
+        transition_type = str(schedule_cfg.get("transition_type", "uniform")).lower()
+        insert_type = str(schedule_cfg.get("insert_type", "uniform")).lower()
+        include_mask_in_vocab = (
+            transition_type in {"mask", "delayed_mask"} or insert_type == "mask"
+        )
+
+        self.bridge = InsertDeleteTorchJaxBridge(
+            dictionary,
+            max_len=self.max_len,
+            include_mask_in_vocab=include_mask_in_vocab,
+        )
         self.pad_token_id = self.bridge.pad_token_id
         self.eos_token_id = self.bridge.eos_token_id
         self.sos_token_id = self.bridge.sos_token_id
@@ -80,7 +91,6 @@ class InsertDeleteDiffusion:
         self.delete_token_id = self.bridge.delete_token_id
         self.real_torch_ids_tensor = self.bridge.real_torch_ids_tensor
 
-        schedule_cfg = config.get("schedule", {})
         deny_insert_jax = self.bridge.resolve_deny_insert_jax(
             schedule_cfg=schedule_cfg, dictionary=dictionary
         )
@@ -249,9 +259,9 @@ class InsertDeleteDiffusion:
         pred_insert_logprob: torch.Tensor,
         pred_prev_token_logprob: torch.Tensor,
         pred_delete_logprob: torch.Tensor,
-        xtplus1_tokens: np.ndarray,
-        xtplus1_length: np.ndarray,
-        t: np.ndarray,
+        xtplus1_tokens: torch.Tensor,
+        xtplus1_length: torch.Tensor,
+        t: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Convert model outputs to reverse-step parameterization when needed.
 
@@ -271,42 +281,13 @@ class InsertDeleteDiffusion:
             return pred_insert_logprob, pred_prev_token_logprob, pred_delete_logprob
         if self.x0_parameterizer is None:
             raise RuntimeError("x0 parameterizer is not initialized.")
-
-        converted_insert, converted_prev_token, converted_delete = (
-            self.x0_parameterizer.apply_numpy(
-                approx_was_insert_log_prob=pred_insert_logprob.detach()
-                .cpu()
-                .numpy()
-                .astype(np.float32),
-                approx_previous_token_log_probs=pred_prev_token_logprob.detach()
-                .cpu()
-                .numpy()
-                .astype(np.float32),
-                approx_delete_log_probs=pred_delete_logprob.detach()
-                .cpu()
-                .numpy()
-                .astype(np.float32),
-                xtplus1_tokens=xtplus1_tokens.astype(np.int32, copy=False),
-                xtplus1_length=xtplus1_length.astype(np.int32, copy=False),
-                t=t.astype(np.int32, copy=False),
-            )
-        )
-        return (
-            torch.tensor(
-                converted_insert,
-                dtype=torch.float32,
-                device=pred_insert_logprob.device,
-            ),
-            torch.tensor(
-                converted_prev_token,
-                dtype=torch.float32,
-                device=pred_prev_token_logprob.device,
-            ),
-            torch.tensor(
-                converted_delete,
-                dtype=torch.float32,
-                device=pred_delete_logprob.device,
-            ),
+        return self.x0_parameterizer.apply_torch(
+            approx_was_insert_log_prob=pred_insert_logprob,
+            approx_previous_token_log_probs=pred_prev_token_logprob,
+            approx_delete_log_probs=pred_delete_logprob,
+            xtplus1_tokens=xtplus1_tokens.to(torch.int32),
+            xtplus1_length=xtplus1_length.to(torch.int32),
+            t=t.to(torch.int32),
         )
 
     def _prepare_tokens_for_x0_parameterization(
@@ -324,6 +305,27 @@ class InsertDeleteDiffusion:
         return self.bridge.jax_tokens_lengths_to_torch_batch(
             tokens, lengths, device=device
         )
+
+    def _attach_virtual_eos_boundary_for_runner(
+        self, tokens: torch.Tensor, lengths: np.ndarray
+    ) -> torch.Tensor:
+        """Insert EOS marker for runner compatibility after reverse sampling.
+
+        Insert/delete diffusion itself does not model EOS as a stochastic token.
+        The base evaluation pipeline in this repo expects one EOS marker per
+        sequence, so we stamp EOS at the predicted boundary index post-hoc.
+        """
+        out = tokens.clone()
+        bsz, seq_len = out.shape
+        eos_idx = torch.tensor(lengths, dtype=torch.long, device=out.device).clamp(
+            min=0, max=max(seq_len - 1, 0)
+        )
+        out.scatter_(1, eos_idx[:, None], self.eos_token_id)
+        pos = torch.arange(seq_len, device=out.device)[None, :]
+        out = torch.where(
+            pos > eos_idx[:, None], torch.full_like(out, self.pad_token_id), out
+        )
+        return out
 
     def _build_decoder_input_with_eos_boundary(
         self, xt: torch.Tensor, lengths: torch.Tensor
@@ -425,6 +427,18 @@ class InsertDeleteDiffusion:
             backbone.insertdelete_length_head(pooled_hidden), dim=-1
         )
 
+        all_logits = [
+            token_logits,
+            insert_logits,
+            delete_logits,
+            eos_delete_logits,
+        ]
+
+        # check for nans in logits
+        for logit in all_logits:
+            if torch.isnan(logit).any():
+                raise ValueError("NaN detected in model logits.")
+
         pred_insert_logprob = F.logsigmoid(insert_logits)
         pred_not_insert_logprob = F.logsigmoid(-insert_logits)
         pred_token_cond_logprob = F.log_softmax(token_logits, dim=-1)
@@ -436,21 +450,26 @@ class InsertDeleteDiffusion:
             dim=-1,
         )
 
-        xt_tokens_np = xtplus1_tokens_jax.detach().cpu().numpy().astype(np.int32)
-        xt_lengths_np = xtplus1_length.detach().cpu().numpy().astype(np.int32)
+        xt_tokens_for_param = xtplus1_tokens_jax.to(torch.int32)
+        xt_lengths_for_param = xtplus1_length.to(torch.int32)
         if self.model_prediction == "x0":
             xt_tokens_np = self._prepare_tokens_for_x0_parameterization(
-                xt_tokens_np, xt_lengths_np
+                xtplus1_tokens_jax.detach().cpu().numpy().astype(np.int32),
+                xtplus1_length.detach().cpu().numpy().astype(np.int32),
             )
+            xt_tokens_for_param = torch.tensor(
+                xt_tokens_np, dtype=torch.int32, device=xtplus1.device
+            )
+            xt_lengths_for_param = xtplus1_length.to(torch.int32)
 
         pred_insert_logprob, pred_prev_token_logprob, pred_delete_logprob = (
             self._maybe_apply_model_parameterization(
                 pred_insert_logprob=pred_insert_logprob,
                 pred_prev_token_logprob=pred_prev_token_logprob,
                 pred_delete_logprob=pred_delete_logprob,
-                xtplus1_tokens=xt_tokens_np,
-                xtplus1_length=xt_lengths_np,
-                t=t.detach().cpu().numpy().astype(np.int32),
+                xtplus1_tokens=xt_tokens_for_param,
+                xtplus1_length=xt_lengths_for_param,
+                t=t.to(torch.int32),
             )
         )
 
@@ -724,6 +743,9 @@ class InsertDeleteDiffusion:
 
         prediction = self._jax_tokens_lengths_to_torch_batch(
             xt_tokens, xt_lengths, run_device
+        )
+        prediction = self._attach_virtual_eos_boundary_for_runner(
+            prediction, xt_lengths
         )
         result = {"prediction": prediction, "logits": final_logits}
         if save_x:

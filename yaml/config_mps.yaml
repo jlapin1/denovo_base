@@ -250,18 +250,15 @@ decoder_insertdelete:
       steps: 256
       top: 1
     schedule:
-      transition_type: uniform # text8_nn | mask | delayed_mask | uniform | pseudogaussian
-      insert_type: uniform # uniform | mask
+      transition_type: mask # text8_nn | mask | delayed_mask | uniform | pseudogaussian
+      insert_type: mask # uniform | mask
       final_relative_size: 1.0
-      final_refresh_prob: 0.01 # near-D3PM regime: very low insert/delete refresh
+      final_refresh_prob: 0.0001 # near-D3PM regime: very low insert/delete refresh
       initial_slope: 1.0
       acceleration: 8.0
-      deny_insert_eos: True
       max_rejects: 16
       deny_insert_tokens:
         - X
-        - <SOS>
-        - <MASK>
         - <INS>
         - <DEL>
     loss_weights:

@@ -12,29 +12,41 @@ from google_d3pm_ins_del import forward_process as gfp
 class InsertDeleteTorchJaxBridge:
     """Bridge utilities for Torch token ids <-> Google JAX sentinel sequences."""
 
-    def __init__(self, dictionary: Dict, *, max_len: int):
+    def __init__(
+        self,
+        dictionary: Dict,
+        *,
+        max_len: int,
+        include_mask_in_vocab: bool = False,
+    ):
         """Build vocabulary maps and conversion helpers.
 
         Args:
             dictionary: Repo token->id dictionary.
             max_len: Maximum modeled sequence length for insert/delete process.
+            include_mask_in_vocab: Whether `<MASK>` should be part of modeled
+                JAX vocabulary (required for mask-based schedule variants).
         """
         self.max_len = int(max_len)
         self.pad_token_id = int(dictionary["X"])
-        self.eos_token_id = int(dictionary["<EOS>"])
+        self.eos_token_id = int(dictionary.get("<EOS>", -1))
         self.sos_token_id = int(dictionary.get("<SOS>", -1))
         self.mask_token_id = int(dictionary.get("<MASK>", -1))
         self.insert_token_id = int(dictionary["<INS>"])
         self.delete_token_id = int(dictionary["<DEL>"])
+        self.include_mask_in_vocab = bool(include_mask_in_vocab)
 
         excluded = {
             self.pad_token_id,
             self.sos_token_id,
-            self.mask_token_id,
             self.insert_token_id,
             self.delete_token_id,
         }
-        # EOS is part of modeled vocabulary.
+        if not self.include_mask_in_vocab and self.mask_token_id >= 0:
+            excluded.add(self.mask_token_id)
+        if self.eos_token_id >= 0:
+            excluded.add(self.eos_token_id)
+        # EOS is a virtual boundary for insert/delete math, not a modeled token.
         real_torch_ids = sorted({idx for idx in dictionary.values() if idx not in excluded})
         self.real_torch_ids_tensor = torch.tensor(real_torch_ids, dtype=torch.long)
         self.jax_to_torch = np.array(real_torch_ids, dtype=np.int64)
@@ -51,8 +63,6 @@ class InsertDeleteTorchJaxBridge:
     ) -> Tuple[int, ...]:
         """Map config deny-list token names to modeled JAX ids."""
         deny_insert_tokens = set(schedule_cfg.get("deny_insert_tokens", []))
-        if schedule_cfg.get("deny_insert_eos", True):
-            deny_insert_tokens.add("<EOS>")
         deny_insert_jax = []
         for token_name in deny_insert_tokens:
             if token_name not in dictionary:
@@ -96,6 +106,12 @@ class InsertDeleteTorchJaxBridge:
             raise ValueError("Encountered INS token in x0 prefix; expected clean target.")
         if np.any(valid_prefix_mask & (x0_np == self.delete_token_id)):
             raise ValueError("Encountered DEL token in x0 prefix; expected clean target.")
+        if self.mask_token_id >= 0 and np.any(valid_prefix_mask & (x0_np == self.mask_token_id)):
+            raise ValueError("Encountered MASK token in x0 prefix; expected clean target.")
+        if self.eos_token_id >= 0 and np.any(valid_prefix_mask & (x0_np == self.eos_token_id)):
+            raise ValueError(
+                "Encountered EOS token in x0 prefix; EOS must stay a virtual boundary."
+            )
         if np.any(x0_np < 0) or np.any(x0_np >= self.torch_to_jax_lut.shape[0]):
             raise ValueError("Encountered token id outside insert/delete vocabulary LUT.")
 
