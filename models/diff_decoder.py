@@ -531,6 +531,7 @@ class MDLMDecoder(base_diffusion_decoder):
         seqmask=None,
         self_conditions=None,
         doubled=False,
+        return_hidden=False,
     ):
         # Timestep
         time_emb = self.time_embed(mp.FourierFeatures(timesteps, 0.000001, 10, self.timestep_dimension))
@@ -553,12 +554,17 @@ class MDLMDecoder(base_diffusion_decoder):
         )
         cache = out['kv_cache']
         out = out['out']
+        hidden = out
 
         # End
         out = self.proj_end(out)
         out = self.RemovePrecursorToken(out)
+        hidden = self.RemovePrecursorToken(hidden)
 
-        return {'out': out, 'sa_cache': cache}
+        output = {'out': out, 'sa_cache': cache}
+        if return_hidden:
+            output['hidden'] = hidden
+        return output
     
     def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
         bs = embedding.shape[0]

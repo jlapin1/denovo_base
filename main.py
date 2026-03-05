@@ -35,6 +35,7 @@ from runners.denovo_objects import (
     set_runtime_device,
 )
 from runners.d3pm_objects import DenovoD3PMObj
+from runners.insertdelete_objects import DenovoInsertDeleteObj
 nn = th.nn
 F = nn.functional
 choice = np.random.choice
@@ -145,7 +146,10 @@ if __name__ == '__main__':
     #####################
 
     print("<DSCOMMENT> Denovo sequencing")
-    if 'd3pm' in config['decoder_name']:
+    if 'insertdelete' in config['decoder_name']:
+        print("<DSCOMMENT> Using insert/delete diffusion decoder")
+        D = DenovoInsertDeleteObj(config, svdir=svdir, rddir=rddir)
+    elif 'd3pm' in config['decoder_name']:
         print("<DSCOMMENT> Using D3PM decoder")
         D = DenovoD3PMObj(config, svdir=svdir, rddir=rddir)
     elif 'diff' in config['decoder_name']:
@@ -180,7 +184,7 @@ if __name__ == '__main__':
         # Apply settings that are independent of training
         max_batches = int(eval(str(evc['val_steps'] if evc['val_steps'] is not None else 9e10)))
         if 'max_batches' in evc.keys(): max_batches = evc['max_batches'] # override val steps
-        if config['decoder_name'] in ['diff', 'mdlm', 'd3pm']:
+        if config['decoder_name'] in ['diff', 'mdlm', 'd3pm', 'insertdelete']:
             if evc['clamp_denoised'] is not None:
                 D.model.decoder.clamp_denoised = evc['clamp_denoised']
             if evc['n'] is not None:

@@ -1,11 +1,13 @@
 import torch as th
 from torch import nn
+from copy import deepcopy
 from models.encoder import Encoder
 from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
 from models.mdlm.diffusion import Diffusion as MDLMDiffusion
 from models.d3pm.diffusion import D3PMDiffusion
+from models.insertdelete.diffusion import InsertDeleteDiffusion
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -106,6 +108,16 @@ def _resolve_time_conditioning_and_embed_type(diff_config, decoder_tag):
     if not time_conditioning:
         return False, None
     return True, embed_type
+
+
+def _ensure_insertdelete_tokens(token_dict):
+    out = deepcopy(token_dict)
+    next_idx = max(out.values()) + 1
+    for token_name in ["<INS>", "<DEL>"]:
+        if token_name not in out:
+            out[token_name] = next_idx
+            next_idx += 1
+    return out
 
 class Seq2Seq(nn.Module):
     def __init__(
@@ -565,6 +577,142 @@ class Seq2SeqD3PM(Seq2Seq):
             )
         
         # Select winners and reshape
+        reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
+        top_sequences = reshape(seqs[winners])
+        logits = reshape(logits[winners])
+        additional_outputs = {x: reshape(y[winners]) for x, y in diffout.items()}
+
+        return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
+        return return_
+
+
+class Seq2SeqInsertDelete(Seq2Seq):
+    """Seq2Seq wrapper for insert/delete diffusion decoding.
+
+    This class wires the shared encoder + MDLM decoder backbone with the extra
+    insert/delete heads and the `InsertDeleteDiffusion` objective/sampler.
+    """
+
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        """Construct insert/delete seq2seq model.
+
+        Args:
+            encoder_config: Encoder configuration dict.
+            decoder_config: Decoder configuration dict.
+            diff_config: Insert/delete diffusion configuration.
+            ensemble_config: Inference ensembling settings.
+            top_peaks: Number of spectrum peaks for encoder input.
+            token_dict: Base output token dictionary.
+            **kwargs: Optional runtime/data settings (masses path, precomputed encoder args).
+        """
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+            **kwargs,
+        )
+        token_dict = _ensure_insertdelete_tokens(token_dict)
+
+        default_kv_indim = encoder_config.get('running_units')
+        if self.encoder is not None:
+            default_kv_indim = self.encoder.run_units
+        decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
+        _, embed_type = _resolve_time_conditioning_and_embed_type(diff_config, "InsertDelete")
+        self.decoder = MDLMDecoder(
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            embed_type          = embed_type,
+            **decoder_config,
+        )
+
+        # Extra heads required by the insert/delete reverse-process marginals.
+        run_units = int(decoder_config['running_units'])
+        max_len = int(decoder_config['sequence_length'])
+        self.decoder.insertdelete_insert_head = nn.Linear(run_units, 1)
+        # Delete-count logits are predicted for token positions plus an explicit
+        # EOS boundary position (constructed in InsertDeleteDiffusion).
+        self.decoder.insertdelete_delete_head = nn.Linear(run_units, max_len + 1)
+        self.decoder.insertdelete_length_head = nn.Linear(run_units, max_len + 1)
+
+        self.diff_obj = InsertDeleteDiffusion(diff_config, self.decoder.outdict, self.decoder)
+        self.decoder.diff_obj = self.diff_obj
+
+        self.ens_size = ensemble_config['ensemble_n']
+        self.mass_tol = eval(ensemble_config['mass_tol'])
+        if 'masses_path' in kwargs:
+            self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+
+    def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
+        """Run one insert/delete diffusion decode pass.
+
+        Args:
+            batch: Input batch with spectra/conditioning fields.
+            top: Optional top-k sampling parameter.
+            save_x: Whether to save intermediate token states.
+            save_p: Whether to save intermediate token probabilities.
+            num_steps: Optional number of reverse steps.
+            progress: Whether to show sampler progress.
+            **kwargs: Reserved compatibility kwargs.
+
+        Returns:
+            Decoder output dict containing prediction/logits and optional traces.
+        """
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        return decout
+
+    def predict_sequence(
+        self,
+        batch: dict,
+        save_x: bool=False,
+        save_p: bool=False,
+        num_steps: int=None,
+        top: int=None,
+        n: int=None,
+        return_full: dict=False,
+        progress: bool=False,
+    ):
+        """Predict peptide sequences with optional ensembling and diagnostics.
+
+        Args:
+            batch: Input batch dict.
+            save_x: Whether to return sampled token trajectories.
+            save_p: Whether to return probability trajectories.
+            num_steps: Optional number of reverse diffusion steps.
+            top: Optional top-k sampling parameter.
+            n: Number of ensemble samples per input.
+            return_full: If True, keep all ensemble candidates.
+            progress: Whether to show sampler progress.
+
+        Returns:
+            Dict with `prediction`, `logits`, and optional trajectory diagnostics.
+        """
+        batch_size, SL = batch['mz'].shape
+        n = self.ens_size if n==None else n
+        batch = expand_batch(batch, n=n)
+
+        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        seqs = diffout.pop('prediction')
+        logits = diffout.pop('logits')
+
+        if n == 1:
+            winners = th.arange(batch_size)
+        else:
+            winners = find_winners(
+                seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
+            )
+
         reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
         top_sequences = reshape(seqs[winners])
         logits = reshape(logits[winners])
