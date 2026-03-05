@@ -3,7 +3,7 @@ inference: False
 batch_size: 512
 top_peaks: 100
 pep_length: [0, 14]
-epochs: 100
+epochs: 200
 
 #################
 # Learning rate #
@@ -11,7 +11,7 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 4.0e-4 # phase 2 LR
+lr_warmup_end: 1.5e-3 # phase 2 LR
 lr_warmup_steps: 100 #20000
 # Phase 2 - Flat
 lr_flat_steps: 1680 #266000
@@ -59,8 +59,8 @@ loader:
   encoder_arrays_path: /Users/alfred/Datasets/DeNovoMNIST/kingdoms_sacc_8k
   precomputed_encoder_dim: 512
   num_workers: 0
-  val_batch_size: 256
-  test_batch_size: 256
+  val_batch_size: 1024
+  test_batch_size: 1024
   reverse: False
   val_steps: -1
   disperse: False
@@ -189,7 +189,7 @@ decoder_mdlm:
     T: 0
     subs_masking: False
     parameterization: subs
-    time_conditioning: True
+    time_conditioning: False
     sampling:
       predictor: ddpm_cache
       steps: 4
@@ -214,6 +214,62 @@ decoder_mdlm:
     model:
       length: 15
       self_condition: True
+
+decoder_d3pm:
+  diffusion_config:
+    T: 256
+    time_conditioning: True
+    eps: 1.0e-6
+    model_prediction: x0
+    loss_type: hybrid # kl | cross_entropy_x0 | hybrid
+    hybrid_coeff: 1.0e-2
+    custom_loss: False
+    transition:
+      type: uniform # uniform | absorbing | explicit
+      beta_schedule: cosine # cosine | linear
+      beta_start: 1.0e-4
+      beta_end: 8.0e-3
+    sampling:
+      steps: 16
+      top: 1
+      prior_type: uniform # uniform | absorbing
+    training:
+      ema: 0.9999
+    model:
+      length: 15
+      self_condition: True
+      embed_type: normembed
+
+decoder_insertdelete:
+  diffusion_config:
+    T: 256
+    time_conditioning: True
+    model_prediction: x0 # x0 | direct
+    seed: 0
+    sampling:
+      steps: 256
+      top: 1
+    schedule:
+      transition_type: mask # text8_nn | mask | delayed_mask | uniform | pseudogaussian
+      insert_type: mask # uniform | mask
+      final_relative_size: 1.0
+      final_refresh_prob: 0.0001 # near-D3PM regime: very low insert/delete refresh
+      initial_slope: 1.0
+      acceleration: 8.0
+      max_rejects: 16
+      deny_insert_tokens:
+        - X
+        - <INS>
+        - <DEL>
+    loss_weights:
+      token: 1.0
+      insert: 1.0
+      delete: 1.0
+      length: 1.0
+    model:
+      length: 15
+      self_condition: True
+      embed_type: normembed
 
 ############################
 # Classifier for diffusion #

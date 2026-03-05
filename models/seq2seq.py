@@ -1,10 +1,13 @@
 import torch as th
 from torch import nn
+from copy import deepcopy
 from models.encoder import Encoder
 from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
 from models.mdlm.diffusion import Diffusion as MDLMDiffusion
+from models.d3pm.diffusion import D3PMDiffusion
+from models.insertdelete.diffusion import InsertDeleteDiffusion
 import os
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
@@ -91,6 +94,30 @@ def mass_objects(masses_path, output_dictionary):
     int2mass = {Int: str2mass.get(string, 0) for string, Int in output_dictionary.items()}
     masses_array = th.tensor([m[1] for m in sorted(int2mass.items())])
     return str2mass, int2mass, masses_array
+
+
+def _resolve_time_conditioning_and_embed_type(diff_config, decoder_tag):
+    time_conditioning = bool(diff_config.get('time_conditioning', True))
+    embed_type = diff_config.get('model', {}).get('embed_type', None)
+    if time_conditioning and embed_type is None:
+        raise ValueError(
+            f"{decoder_tag}: diffusion_config.time_conditioning=True requires "
+            "diffusion_config.model.embed_type to be set in yaml "
+            "(e.g. 'adaLN', 'normembed', or 'preembed')."
+        )
+    if not time_conditioning:
+        return False, None
+    return True, embed_type
+
+
+def _ensure_insertdelete_tokens(token_dict):
+    out = deepcopy(token_dict)
+    next_idx = max(out.values()) + 1
+    for token_name in ["<INS>", "<DEL>"]:
+        if token_name not in out:
+            out[token_name] = next_idx
+            next_idx += 1
+    return out
 
 class Seq2Seq(nn.Module):
     def __init__(
@@ -354,9 +381,11 @@ class Seq2SeqMDLM(Seq2Seq):
         decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
         decoder_config['kv_indim'] = decoder_kv_indim
         self.configure_precomputed_encoder(decoder_kv_indim)
+        _, embed_type = _resolve_time_conditioning_and_embed_type(diff_config, "MDLM")
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,
+            embed_type          = embed_type,
             **decoder_config,
         )
         # Diffusion object
@@ -434,6 +463,256 @@ class Seq2SeqMDLM(Seq2Seq):
             )
         
         # Select winners and reshape
+        reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
+        top_sequences = reshape(seqs[winners])
+        logits = reshape(logits[winners])
+        additional_outputs = {x: reshape(y[winners]) for x, y in diffout.items()}
+
+        return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
+        return return_
+
+
+class Seq2SeqD3PM(Seq2Seq):
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+            **kwargs,
+        )
+        # Decoder model
+        default_kv_indim = encoder_config.get('running_units')
+        if self.encoder is not None:
+            default_kv_indim = self.encoder.run_units
+        decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
+        _, embed_type = _resolve_time_conditioning_and_embed_type(diff_config, "D3PM")
+        self.decoder = MDLMDecoder(
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            embed_type          = embed_type,
+            **decoder_config,
+        )
+        # Diffusion object
+        self.diff_obj = D3PMDiffusion(diff_config, self.decoder.outdict, self.decoder)
+        self.decoder.diff_obj = self.diff_obj
+
+        self.ens_size = ensemble_config['ensemble_n']
+        self.mass_tol = eval(ensemble_config['mass_tol'])
+        # Scale
+        if 'masses_path' in kwargs:
+            self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+    
+    def get_reveal_steps(self, x_in_time):
+        trajectory_length = x_in_time.shape[1]
+        reveal = ((x_in_time != self.decoder.MASK).int().argmax(1)-1).clip(min=0)
+        never_selected = x_in_time[:, -1] == self.decoder.MASK
+        reveal[never_selected] = trajectory_length - 2
+        return reveal
+
+    def calculate_min_peptide_prob(self, prediction, logits_in_time, sl_mask):
+        bs, steps, sl, cats = logits_in_time.shape
+        min_conf_ = logits_in_time.gather(-1, prediction[:,None,:,None].tile([1,steps,1,1]))[...,0].min(dim=1)[0]
+        return min_conf_, (min_conf_*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9)
+
+    def calculate_entropy_prob(self, logits_in_time, reveal_mask, sl_mask):
+        entropy = -(logits_in_time * (logits_in_time+1e-9).log()).sum(dim=-1)
+        aa_entropy = (entropy*reveal_mask).sum(dim=1) / (reveal_mask.sum(dim=1)+1e-9) # average over masked tokens
+        pep_entropy = (aa_entropy*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9) # average over sequence length
+        return aa_entropy, pep_entropy
+
+    def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        spectrum_mask = dictionary['mask']
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        return decout
+
+    def predict_sequence(
+        self, 
+        batch: dict,             # batch of inputs
+        save_x: bool=False,      # return the intseqs at every step
+        save_p: bool=False,      # return the logits at every step
+        num_steps: int=None,     # number of sampling steps in decoder
+        top: int=None,           # top categorical sampling; None defaults to config.yaml setting
+        n: int=None,             # return n sequences per batch member; None defaults to config.yaml setting
+        return_full: dict=False, # return n outputs for each batch member (instead of 1/top sequence)
+        progress: bool=False,    # tqdm progress bar
+    ):
+        # Input batch
+        batch_size, SL = batch['mz'].shape
+        n = self.ens_size if n==None else n
+        batch = expand_batch(batch, n=n)
+        
+        # Model outputs
+        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        seqs = diffout.pop('prediction')
+        logits = diffout.pop('logits')
+        
+        # Probability calculations
+        if save_p and save_x:
+            nbs, sl = seqs.shape
+            slmask = th.arange(sl, device=seqs.device)[None].tile([nbs, 1]) < (seqs == self.decoder.EOS).int().argmax(dim=1)[:,None]
+            diffout['aa_prob_min'], diffout['pep_prob_min'] = self.calculate_min_peptide_prob(seqs, diffout['p_save'], slmask)
+            
+            reveal = self.get_reveal_steps(diffout['x_save'])
+            reveal_mask = th.arange(diffout['p_save'].shape[1], device=seqs.device)[None,:,None].tile([nbs, 1, sl]) < reveal[:,None]
+            diffout['aa_entropy'], diffout['pep_entropy'] = self.calculate_entropy_prob(diffout['p_save'], reveal_mask, slmask)
+        
+        # Find winners
+        if n == 1:
+            winners = th.arange(batch_size)
+        else:
+            winners = find_winners(
+                seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
+            )
+        
+        # Select winners and reshape
+        reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
+        top_sequences = reshape(seqs[winners])
+        logits = reshape(logits[winners])
+        additional_outputs = {x: reshape(y[winners]) for x, y in diffout.items()}
+
+        return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
+        return return_
+
+
+class Seq2SeqInsertDelete(Seq2Seq):
+    """Seq2Seq wrapper for insert/delete diffusion decoding.
+
+    This class wires the shared encoder + MDLM decoder backbone with the extra
+    insert/delete heads and the `InsertDeleteDiffusion` objective/sampler.
+    """
+
+    def __init__(
+        self,
+        encoder_config,
+        decoder_config,
+        diff_config,
+        ensemble_config=None,
+        top_peaks=100,
+        token_dict={},
+        **kwargs
+    ):
+        """Construct insert/delete seq2seq model.
+
+        Args:
+            encoder_config: Encoder configuration dict.
+            decoder_config: Decoder configuration dict.
+            diff_config: Insert/delete diffusion configuration.
+            ensemble_config: Inference ensembling settings.
+            top_peaks: Number of spectrum peaks for encoder input.
+            token_dict: Base output token dictionary.
+            **kwargs: Optional runtime/data settings (masses path, precomputed encoder args).
+        """
+        super().__init__(
+            encoder_config=encoder_config,
+            top_peaks=top_peaks,
+            **kwargs,
+        )
+        token_dict = _ensure_insertdelete_tokens(token_dict)
+
+        default_kv_indim = encoder_config.get('running_units')
+        if self.encoder is not None:
+            default_kv_indim = self.encoder.run_units
+        decoder_kv_indim = decoder_config.get('kv_indim', default_kv_indim)
+        decoder_config['kv_indim'] = decoder_kv_indim
+        self.configure_precomputed_encoder(decoder_kv_indim)
+        _, embed_type = _resolve_time_conditioning_and_embed_type(diff_config, "InsertDelete")
+        self.decoder = MDLMDecoder(
+            token_dict          = token_dict,
+            decoder_config      = decoder_config,
+            embed_type          = embed_type,
+            **decoder_config,
+        )
+
+        # Extra heads required by the insert/delete reverse-process marginals.
+        run_units = int(decoder_config['running_units'])
+        max_len = int(decoder_config['sequence_length'])
+        self.decoder.insertdelete_insert_head = nn.Linear(run_units, 1)
+        # Delete-count logits are predicted for token positions plus an explicit
+        # EOS boundary position (constructed in InsertDeleteDiffusion).
+        self.decoder.insertdelete_delete_head = nn.Linear(run_units, max_len + 1)
+        self.decoder.insertdelete_length_head = nn.Linear(run_units, max_len + 1)
+
+        self.diff_obj = InsertDeleteDiffusion(diff_config, self.decoder.outdict, self.decoder)
+        self.decoder.diff_obj = self.diff_obj
+
+        self.ens_size = ensemble_config['ensemble_n']
+        self.mass_tol = eval(ensemble_config['mass_tol'])
+        if 'masses_path' in kwargs:
+            self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+
+    def forward(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
+        """Run one insert/delete diffusion decode pass.
+
+        Args:
+            batch: Input batch with spectra/conditioning fields.
+            top: Optional top-k sampling parameter.
+            save_x: Whether to save intermediate token states.
+            save_p: Whether to save intermediate token probabilities.
+            num_steps: Optional number of reverse steps.
+            progress: Whether to show sampler progress.
+            **kwargs: Reserved compatibility kwargs.
+
+        Returns:
+            Decoder output dict containing prediction/logits and optional traces.
+        """
+        dictionary = self.encoder_embedding(batch)
+        embedding = dictionary['emb']
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        return decout
+
+    def predict_sequence(
+        self,
+        batch: dict,
+        save_x: bool=False,
+        save_p: bool=False,
+        num_steps: int=None,
+        top: int=None,
+        n: int=None,
+        return_full: dict=False,
+        progress: bool=False,
+    ):
+        """Predict peptide sequences with optional ensembling and diagnostics.
+
+        Args:
+            batch: Input batch dict.
+            save_x: Whether to return sampled token trajectories.
+            save_p: Whether to return probability trajectories.
+            num_steps: Optional number of reverse diffusion steps.
+            top: Optional top-k sampling parameter.
+            n: Number of ensemble samples per input.
+            return_full: If True, keep all ensemble candidates.
+            progress: Whether to show sampler progress.
+
+        Returns:
+            Dict with `prediction`, `logits`, and optional trajectory diagnostics.
+        """
+        batch_size, SL = batch['mz'].shape
+        n = self.ens_size if n==None else n
+        batch = expand_batch(batch, n=n)
+
+        diffout = self(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        seqs = diffout.pop('prediction')
+        logits = diffout.pop('logits')
+
+        if n == 1:
+            winners = th.arange(batch_size)
+        else:
+            winners = find_winners(
+                seqs, self.masses, batch['mass'], batch['charge'], n, self.mass_tol, return_full=return_full
+            )
+
         reshape = (lambda x: reshape_top_k(x, n)) if return_full else lambda x: x
         top_sequences = reshape(seqs[winners])
         logits = reshape(logits[winners])
