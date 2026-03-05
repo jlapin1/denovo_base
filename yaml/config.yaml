@@ -27,12 +27,12 @@ prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: True
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 5400
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
@@ -44,7 +44,7 @@ loader:
   train_name: train
   val_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2
   val_name: val
-  datapath_extension: parquet/andere
+  datapath_extension: parquet/melange
   masses_path: /cmnfs/data/proteomics/foundational_model/MKB2
   dictionary_path: /cmnfs/data/proteomics/foundational_model/MKB2/dictionary.tsv
   synonyms:
@@ -183,7 +183,7 @@ decoder_mdlm:
     subs_masking: False
     parameterization: subs
     custom_loss: True
-    time_conditioning: True
+    time_conditioning: False
     sampling:
       predictor: ddpm_cache
       steps: 64
