@@ -85,7 +85,8 @@ class Diffusion:
     self.antithetic_sampling = self.config['training']['antithetic_sampling']
     self.importance_sampling = self.config['training']['importance_sampling']
     self.change_of_variables = self.config['training']['change_of_variables']
-    
+    self.use_guidance = self.config['guidance']['p_uncond'] > 0
+
     self.mask_index = dictionary['<MASK>']
     self.eos_token_id = dictionary['<EOS>']
     self.NT = dictionary['X']
@@ -277,13 +278,40 @@ class Diffusion:
     assert sigma.ndim == 1, sigma.shape
     return sigma
 
-  def forward(self, x, sigma, model_kwargs={}):
+  def add_unconditional_to_batch(self, x, model_kwargs):
+      # Double up sequence
+      x = torch.cat([x, x], dim=0)
+      
+      # Create conditional/unconditional mass vector
+      #  then put it back in kwargs
+      mass = model_kwargs.pop('mass')
+      if mass.shape[0] != x.shape[0]:  
+        mass = torch.cat([mass, 0*mass], dim=0)
+      model_kwargs['mass'] = mass
+      
+      # Double up kwargs
+      for key, value in model_kwargs.items():
+          if value.shape[0] != x.shape[0]:
+            model_kwargs[key] = torch.cat([value, value], axis=0)
+     
+      return x, model_kwargs
+
+  def forward(self, x, sigma, model_kwargs={}, training=False):
     """Returns log score."""
     sigma = self._process_sigma(sigma)
     model_kwargs['timesteps'] = sigma
-    with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float32):
-      logits = self.backbone(x, **model_kwargs)['out']
-    
+    if self.use_guidance and not training:
+        x_, model_kwargs = self.add_unconditional_to_batch(x, model_kwargs)
+    else:
+        x_ = x
+    #with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float32):
+    logits = self.backbone(x_, **model_kwargs)['out']
+    if 'self_conditions' in model_kwargs:
+        model_kwargs['self_conditions'] = logits
+    if self.use_guidance and not training:
+        cond, uncond = logits.chunk(2)
+        logits = self.config['guidance']['w']*(cond-uncond) + uncond
+
     if self.parameterization == 'subs':
       out = self._subs_parameterization(logits=logits.clone(),
                                          xt=x)
@@ -677,7 +705,8 @@ class Diffusion:
       p_x0_cache = None
       if self.config['model']['self_condition']:
           model_kwargs['self_conditions'] = torch.zeros(
-              batch_size_per_gpu, x.shape[1], self.vocab_size, device=self.device
+              2*batch_size_per_gpu if self.use_guidance else batch_size_per_gpu, x.shape[1], self.vocab_size, 
+              device=self.device,
           )
       if save_x:
           xsave = torch.zeros(num_steps+2, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
@@ -699,8 +728,6 @@ class Diffusion:
               p_x0_cache, x_next, logits = self._ddpm_caching_update(
                   x, t, dt, p_x0=p_x0_cache, top=top, model_kwargs=model_kwargs
               )
-              if self.config['model']['self_condition']:
-                  model_kwargs['self_conditions'] = logits
           
           Logits[x_next!=x] = logits[x_next!=x]
           if save_p: 
@@ -721,7 +748,7 @@ class Diffusion:
               x = self._denoiser_update(x, t, model_kwargs)
           else:
               sigma_t = self.noise(t)[0]
-              final_, logits = self.forward(x, sigma_t, model_kwargs)
+              final_, logits = self.forward(x, sigma_t, model_kwargs, training=False)
               final = final_.argmax(dim=-1)
               Logits[final!=x] = logits[final!=x]
               if save_x: xsave[-1] = final
@@ -1012,7 +1039,7 @@ class Diffusion:
     model_output = (
         backbone(xt, **model_kwargs)['out']
         if self.config['custom_loss'] else
-        self.forward(xt, sigma[:, None], model_kwargs=model_kwargs)[0]
+        self.forward(xt, sigma[:, None], model_kwargs=model_kwargs, training=True)[0]
     )
 
     if block_training:
