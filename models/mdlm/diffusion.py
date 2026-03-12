@@ -672,16 +672,18 @@ class Diffusion:
           # Unmasking rate is constant throughout trajectory
           timesteps = torch.linspace(1, eps, num_steps + 1, device=self.device)
       
+      #
+      Logits = torch.zeros(batch_size_per_gpu, x.shape[1], self.vocab_size, device=self.device)
       p_x0_cache = None
       if self.config['model']['self_condition']:
           model_kwargs['self_conditions'] = torch.zeros(
               batch_size_per_gpu, x.shape[1], self.vocab_size, device=self.device
           )
       if save_x:
-          xsave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
+          xsave = torch.zeros(num_steps+2, x.shape[0], x.shape[1], dtype=torch.int32, device=self.device)
           xsave[0] = x
       if save_p: 
-          psave = torch.zeros(num_steps, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
+          psave = torch.zeros(num_steps+1, x.shape[0], x.shape[1], self.vocab_size, device=self.device)
       
       # Sampling loops
       pbar = tqdm(range(num_steps)) if progress else range(num_steps)
@@ -699,15 +701,16 @@ class Diffusion:
               )
               if self.config['model']['self_condition']:
                   model_kwargs['self_conditions'] = logits
-           
+          
+          Logits[x_next!=x] = logits[x_next!=x]
           if save_p: 
               psave[i] = p_x0_cache
-          if (not torch.allclose(x_next, x) or self.time_conditioning):
+          if True:#(not torch.allclose(x_next, x) or self.time_conditioning):
               # Disable caching
               p_x0_cache = None
               x = x_next
-          else:
-              x = self._analytic_update(x, t, dt)
+          #else:
+          #    x = self._analytic_update(x, t, dt)
           if save_x: 
               xsave[i+1] = x
       
@@ -718,11 +721,14 @@ class Diffusion:
               x = self._denoiser_update(x, t, model_kwargs)
           else:
               sigma_t = self.noise(t)[0]
-              x, logits = self.forward(x, sigma_t, model_kwargs)
-              x = x.argmax(dim=-1)
+              final_, logits = self.forward(x, sigma_t, model_kwargs)
+              final = final_.argmax(dim=-1)
+              Logits[final!=x] = logits[final!=x]
+              if save_x: xsave[-1] = final
+              if save_p: psave[-1] = final_.exp()
       
       # Output
-      output = {'prediction': x, 'logits': logits}
+      output = {'prediction': final, 'logits': Logits}
       if save_x:
           output['x_save'] = xsave.transpose(0,1)
       if save_p:

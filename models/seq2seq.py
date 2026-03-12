@@ -314,8 +314,8 @@ class Seq2SeqMDLM(Seq2Seq):
     def get_reveal_steps(self, x_in_time):
         trajectory_length = x_in_time.shape[1]
         reveal = ((x_in_time != self.decoder.MASK).int().argmax(1)-1).clip(min=0)
-        never_selected = x_in_time[:, -1] == self.decoder.MASK
-        reveal[never_selected] = trajectory_length - 2
+        #never_selected = x_in_time[:, -1] == self.decoder.MASK
+        #reveal[never_selected] = trajectory_length - 2
         return reveal
 
     def calculate_min_peptide_prob(self, prediction, logits_in_time, sl_mask):

@@ -479,7 +479,7 @@ class MDLMDecoder(base_diffusion_decoder):
             nn.Linear(timestep_dimension, timestep_dimension),
             nn.SiLU(),
             nn.Linear(timestep_dimension, timestep_dimension),
-        )
+        ) if embed_type != None else nn.Identity()
         
         #self.lm_head = nn.Embedding(self.total_num_input_tokens, 
         self.embed_sequence = nn.Embedding(self.predcats, running_units)
