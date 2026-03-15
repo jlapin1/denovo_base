@@ -109,10 +109,12 @@ class base_diffusion_decoder(nn.Module):
                 self.charge_features = lambda charge: (
                     mp.FourierFeatures(charge, 1, 10, precursor_dimension)
                 )
+                self.charge_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
             if use_mass | use_leftover:
                 self.mass_features = lambda mass: (
                     mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
+                self.mass_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
             self.precursor_emb = nn.Sequential(
                 nn.Linear(precursor_dimension*num, running_units)
             )
@@ -185,9 +187,13 @@ class base_diffusion_decoder(nn.Module):
             ce_emb = []
             if self.use_charge:
                 charge = charge.type(th.float32)
-                ce_emb.append(self.charge_features(charge))
+                charge_features = self.charge_features(charge)
+                charge_features[charge==0] = self.charge_sub_vector[None]
+                ce_emb.append(charge_features)
             if self.use_mass:
-                ce_emb.append(self.mass_features(mass))
+                mass_features = self.mass_features(mass)
+                mass_features[mass==0] = self.mass_sub_vector[None]
+                ce_emb.append(mass_features)
             if self.use_leftover:
                 mass_so_far = self.scale.intseq2mz(seq, charge)
                 leftover_mass = mass - mass_so_far

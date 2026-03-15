@@ -289,6 +289,16 @@ class Diffusion:
         mass = torch.cat([mass, 0*mass], dim=0)
       model_kwargs['mass'] = mass
       
+      charge = model_kwargs.pop("charge")
+      if charge.shape[0] != x.shape[0]:
+        charge = torch.cat([charge, 0*charge], dim=0)
+      model_kwargs['charge'] = charge
+
+      kv_features = model_kwargs.pop("kv_features")
+      if kv_features.shape[0] != x.shape[0]:
+          kv_features = torch.cat([kv_features, 0*kv_features], dim=0)
+      model_kwargs['kv_features'] = kv_features
+
       # Double up kwargs
       for key, value in model_kwargs.items():
           if value.shape[0] != x.shape[0]:
