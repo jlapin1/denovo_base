@@ -1,11 +1,12 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
-  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
-  eval_name: cerevisiae
+  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/MKB2 # None: use config.yaml setting, else: override
+  datapath_extension: parquet/melange2
+  eval_name: val
   set: val # key name in D.data.dataloader/dataset
   val_steps: 100
   disperse: False
-  save: False
+  save: True
   stream: False
   outpath: ./hold.parquet
   # diffusion only

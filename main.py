@@ -82,7 +82,10 @@ def main():
 
     # Eval only. Must set before loader is created.
     if config['eval_only']:
+        config['loader']['train_dataset_path'] = evconfig['eval_only']['eval_dataset_path']
+        config['loader']['train_name'] = None
         config['loader']['val_dataset_path'] = evconfig['eval_only']['eval_dataset_path']
+        config['loader']['datapath_extension'] = evconfig['eval_only']['datapath_extension']
         config['loader']['val_name'] = evconfig['eval_only']['eval_name']
         cc = evconfig['eval_only']['loader_custom_columns']
         config['loader']['custom_columns'] = [] if cc == None else cc
