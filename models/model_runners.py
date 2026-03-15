@@ -88,7 +88,8 @@ class BaseDenovo:
         self.eval_kwargs = {}
 
     def save_weights(self, fp='./model.wts'):
-        th.save(self.model.state_dict(), fp)
+        unwrapped_model = self.accelerator.unwrap_model(self._model)
+        th.save(unwrapped_model.state_dict(), fp)
     
     def save_last(self, override=False):
         ready = self.global_step - self.save_last_counter >= self.config['save_last_freq']
@@ -150,7 +151,7 @@ class BaseDenovo:
                 U.optimizer_to(self.opt, device)
     
     def accelerate(self):
-        self.accelerator = Accelerator(gradient_accumulation_steps=2)
+        self.accelerator = Accelerator()#gradient_accumulation_steps=2)
         model, optimizer, training_dataloader = self.accelerator.prepare(
             self.model, self.opt, self.data.dataloader['train']
         )
@@ -159,13 +160,25 @@ class BaseDenovo:
         self.opt = optimizer
         self.data.dataloader['train'] = training_dataloader
         self.device = self.accelerator.device
+        
+        local_batch_size = training_dataloader.batch_size
+        num_processes = self.accelerator.num_processes
+        gradient_accumulation_steps = self.accelerator.gradient_accumulation_steps
+        self.global_batch_size = local_batch_size * num_processes * gradient_accumulation_steps
+        #if self.accelerator.is_local_main_process:
+        #    
+        #    print("Batch size", local_batch_size)
+        #    print("Num processes", num_processes)
+        #    print("Accumulation steps", gradient_accumulation_steps)
+        #    print("Global batch size", self.global_batch_size)
+
 
     def split_labels_str(self, incl_str):
         return [label for label in self.dl.labels if incl_str in label]
     
     def train_epoch(self, svfreq=10000):
         
-        bs = self.config['batch_size']
+        bs = self.global_batch_size #config['batch_size']
         running_loss = {key: deque(maxlen=20) for key in self.training_loss_keys}
         
         # Progress bar
@@ -182,44 +195,48 @@ class BaseDenovo:
         for step, batch in enumerate(pbar):      
             step_start = time()
             
-            if self.config['log_wandb']: wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
+            if self.config['log_wandb'] and self.accelerator.is_local_main_process: 
+                wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
+            self.accelerator.wait_for_everyone()
             
             losses = self.train_step(batch)
             total_loss = losses['loss']
             self.global_step += 1
             
-            if self.config['log_wandb']:
-                loss_printout = 'Loss: %7f'%losses['loss']
-                global_grad_norm = U.global_grad_norm(self.model)
-                self.log_wandb(losses, global_grad_norm)
-            else:
-                for key in running_loss.keys(): running_loss[key].append(losses[key])
-                rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
-                loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
-            pbar.set_description(f"Loss: {loss_printout}")
+            if self.accelerator.is_local_main_process:
+                if self.config['log_wandb'] and self.accelerator.is_local_main_process:
+                    loss_printout = 'Loss: %7f'%losses['loss']
+                    global_grad_norm = U.global_grad_norm(self.model)
+                    self.log_wandb(losses, global_grad_norm)
+                else:
+                    for key in running_loss.keys(): running_loss[key].append(losses[key])
+                    rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
+                    loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
+                pbar.set_description(f"Loss: {loss_printout}")
             
-            self.running_loss.append(total_loss)
-            if self.log and (self.global_step % svfreq == 0):
-                self.savetxt(self.running_loss)
-                self.running_loss = []
-            if self.config['save_weights']:
-                self.save_last()
-            if self.eval_frequency is not None and (self.config['save_weights']|self.config['log_wandb']):
-                if time()-self.eval_time > self.eval_frequency:
-                    out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
-                    self.eval_out = out
-                    new_score = out[self.config['high_score']]
-                    if self.config['save_weights']: self.checkpoint(new_score)
-                    if self.config['log_wandb']: wandb.log(out)
-                    self.eval_time = time()
+            if self.accelerator.is_local_main_process:
+                self.running_loss.append(total_loss)
+                if self.log and (self.global_step % svfreq == 0):
+                    self.savetxt(self.running_loss)
+                    self.running_loss = []
+                if self.config['save_weights']:
+                    self.save_last()
+                if  (self.eval_frequency is not None) and (self.config['save_weights']|self.config['log_wandb']):
+                    if time()-self.eval_time > self.eval_frequency:
+                        out, _ = self.evaluation(dset='val', max_batches=self.val_steps, kwargs=self.eval_kwargs)
+                        self.eval_out = out
+                        new_score = out[self.config['high_score']]
+                        if self.config['save_weights']: self.checkpoint(new_score)
+                        if self.config['log_wandb']: wandb.log(out)
+                        self.eval_time = time()
             
             step_end = time()
             
         if self.log and (len(self.running_loss) > 0):
             self.savetxt(self.running_loss)
             self.running_loss = []
-        
-        print("\rFinal running loss: %s, Final time elapsed: %.0f s"%(loss_printout, time()-epoch_start))
+        if self.accelerator.is_local_main_process:
+            print("\rFinal running loss: %s, Final time elapsed: %.0f s"%(loss_printout, time()-epoch_start))
         
     def savetxt(self, train_loss=None, eval_stats=None):
         if eval_stats is not None:
@@ -394,6 +411,18 @@ class BaseDenovo:
         no_grad=True, 
         kwargs={}
     ):
+        # Sanity check
+        #for name, param in self._model.named_parameters():
+        #    if len(param.shape)>0:
+        #        # Gather the weight from all GPUs and check if they match
+        #        weight = self.accelerator.gather(param.data)
+        #        A, B = weight.split(weight.shape[0]//2, 0)
+        #        are_identical = th.allclose(A, B)
+        #        weight_sum = weight.sum()
+        #        if self.accelerator.is_main_process:
+        #            print(weight.shape)
+        #            print(f"Layer {name} is synchronized across GPUs? {are_identical}")
+        #        break # Just check the first layer to be sure
         
         # Dataframe
         def initial_dataframe(extra_keys: list=[]):
@@ -429,7 +458,12 @@ class BaseDenovo:
             self.data.val_size // self.data.dataloader[dset].batch_size,
             max_batches,
         )
-        pbar = tqdm(self.data.dataloader[dset], total=val_steps, leave=False)
+        pbar = tqdm(
+            self.data.dataloader[dset], 
+            total=val_steps, 
+            leave=False,
+            disable=not self.accelerator.is_local_main_process
+        )
         pbar.set_description(f"Evaluation")
         self.model.eval()
         for i, batch in enumerate(pbar):
@@ -551,7 +585,7 @@ class BaseDenovo:
     def TrainEval(self, eval_dset='val'):
         #self.accelerate()
         start_time = time()
-        lines = []
+        lines = [];highline=""
         for i in range(self.config['epochs']):
             
             # Train
@@ -560,46 +594,48 @@ class BaseDenovo:
             self.on_train_epoch_end()
             
             # Eval
-            if self.eval_frequency is None:
-                out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
-                new_score = out[self.config["high_score"]]
-                if self.config['save_weights']: self.checkpoint(new_score)
+            if self.accelerator.is_local_main_process:
+                if self.eval_frequency is None:
+                    out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
+                    new_score = out[self.config["high_score"]]
+                    if self.config['save_weights']: self.checkpoint(new_score)
+                
+                    # Logging
+                    if self.config['log_wandb']:
+                        out['epoch'] = i+1
+                        wandb.log(out)
+                        out.pop('epoch')
+                else:
+                    out = self.eval_out if hasattr(self, 'eval_out') else self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)[0]
+                    new_score = out[self.config["high_score"]]
             
-                # Logging
-                if self.config['log_wandb']:
-                    out['epoch'] = i+1
-                    wandb.log(out)
-                    out.pop('epoch')
-            else:
-                out = self.eval_out if hasattr(self, 'eval_out') else self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)[0]
-                new_score = out[self.config["high_score"]]
-            
-            specifier = " ".join(len(out)*['%s'])
-            write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
-            line = "ValEpoch %d: %s"%(i, write_out)
-            
-            if new_score > self.high_score:
-                highline = line
-            line += " (%.1f s)"%(time()-start_time)
-            lines.append(line)
-            print("\r"+line)
-            
-            # Saving the checkpoint
-            #if self.config['save_weights']:
-            #    self.checkpoint(new_score)
-                #self.save_last(override=True)
-                #if self.high_score == new_score:
-                #    ext = f"epoch{i}_high_{self.high_score:.3f}"
-                #    wtsdir = os.path.join(self.svdir, "weights")
-                #    for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
-                #    self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
-            
-            self.eval_stats.append(list(out.values()))
-            
-            # Save data
-            if self.log:
-                self.savetxt(train_loss=None, eval_stats=np.array(self.eval_stats))
-            
+                specifier = " ".join(len(out)*['%s'])
+                write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
+                line = "ValEpoch %d: %s"%(i, write_out)
+                
+                if (new_score > self.high_score):
+                    highline = line
+                line += " (%.1f s)"%(time()-start_time)
+                lines.append(line)
+                if self.accelerator.is_local_main_process: print("\r"+line)
+                
+                # Saving the checkpoint
+                #if self.config['save_weights']:
+                #    self.checkpoint(new_score)
+                    #self.save_last(override=True)
+                    #if self.high_score == new_score:
+                    #    ext = f"epoch{i}_high_{self.high_score:.3f}"
+                    #    wtsdir = os.path.join(self.svdir, "weights")
+                    #    for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
+                    #    self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
+                
+                self.eval_stats.append(list(out.values()))
+                
+                # Save data
+                if self.log:
+                    self.savetxt(train_loss=None, eval_stats=np.array(self.eval_stats))
+            self.accelerator.wait_for_everyone()
+
         return lines, highline
 
     def on_train_epoch_end(self, *args, **kwargs):
@@ -898,10 +934,10 @@ class DenovoMDLMObj(BaseDenovo):
         self.accelerate()
 
         if self.accelerator.is_local_main_process:
-            print(f"<DSCOMMENT> Total model parameters: {self._model.module.total_params():,}")
+            print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
 
         self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
-        self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token).to(device)
+        self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token)#.to(device)
 
     def initialize_token_loss(self):
         self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
@@ -922,7 +958,7 @@ class DenovoMDLMObj(BaseDenovo):
             mask = th.cat([th.zeros(mask.shape[0], 1, device=device), mask], dim=1)
             horizontal = th.cat([th.zeros(1), th.full((mask.shape[0],), 1e7)])[None].to(device)
             mask = th.cat([horizontal, mask], dim=0)
-        return mask.to(device)
+        return mask#.to(device)
 
     def inptarg(self, batch):
         bs, sl = batch['intseq'].shape
@@ -930,8 +966,8 @@ class DenovoMDLMObj(BaseDenovo):
         #input_tokens, output_tokens, new_mask = self.model.diff_obj._maybe_sub_sample(self, batch['intseq']) # Unnecessary, I think
         
         target = deepcopy(batch['intseq'])
-        target = self._model.module.decoder.append_null_token(target)
-        target = self._model.module.decoder.replace_with_eos_token(target, batch['peplen'])
+        target = self.model.decoder.append_null_token(target)
+        target = self.model.decoder.replace_with_eos_token(target, batch['peplen'])
         
         loss_mask = self.model.decoder.sequence_mask(target)
         
@@ -947,25 +983,27 @@ class DenovoMDLMObj(BaseDenovo):
         self._model.train()
         self._model.zero_grad()
         
-        embedding = self.model.encoder_embedding(batch)
+        #embedding = self._model.module.encoder_embedding(batch)
         
-        model_kwargs = {
-            'charge': batch['charge'] if 'charge' in batch else None,
-            'mass': batch['mass'] if 'mass' in batch else None,
-            'kv_features': embedding['emb'],
-            'seqmask': training_mask,
-            'doubled': True if block_decoding else False,
-        }
+        #model_kwargs = {
+        #    'charge': batch['charge'] if 'charge' in batch else None,
+        #    'mass': batch['mass'] if 'mass' in batch else None,
+        #    'kv_features': embedding['emb'],
+        #    'seqmask': training_mask,
+        #    'doubled': True if block_decoding else False,
+        #}
         
-        backbone = self.model.decoder
+        # accelerate ONLY works when the train_step calls the most proximate model's (seq2seq) forward function.
+        # - That is what is returned by accelerate's prepare function
+        # - separating the encoder's forward pass from the decoder's prevents synchronization
         if self.diff_config['custom_loss']:
-            model_output, weights, masked_token_mask, timesteps = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+            model_output, weights, masked_token_mask, timesteps = self._model(batch, target, training_mask, block_decoding)
             loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
             weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
             loss = (weights*loss)[masked_token_mask]
             other_losses = {}
         else:
-            loss, other_losses = self.model.diff_obj._forward_pass_diffusion(backbone, target, model_kwargs, block_decoding)
+            loss, other_losses = self._model(batch, target, training_mask, block_decoding)
 
 
         token_nll = loss.mean()
@@ -974,6 +1012,17 @@ class DenovoMDLMObj(BaseDenovo):
         #token_nll.backward()
         self.accelerator.backward(token_nll)
         self.update_lr()
+        # Inside the loop, after backward()
+        #for name, param in self._model.named_parameters():
+        #    grad = param.grad
+        #    if grad is not None:
+        #        gathered_grads = self.accelerator.gather(grad)
+        #        print("SHAPE ", gathered_grads.shape)
+        #        if self.accelerator.is_main_process:
+        #            A,B = gathered_grads.split(gathered_grads.shape[0]//2, 0)
+        #            grads_match = th.allclose(A, B)
+        #            print(f"Gradients for {name} ({A.norm()}) synchronized: {grads_match}")
+        
         self.opt.step()
                 
         return losses

@@ -976,9 +976,8 @@ class Diffusion:
                           dim=-1,
                           index=x0[:, :, None]).squeeze(-1)
 
-  def _forward_pass_diffusion(self, backbone, x0, model_kwargs, block_training=False):
+  def _forward_pass_diffusion(self, x0, model_kwargs, block_training=False):
     bs, sl = x0.shape
-
     t = self._sample_t(bs, x0.device)#[torch.randperm(x0.shape[0])]
     if self.T > 0:
       t = (t * self.T).to(torch.int)
@@ -1006,11 +1005,11 @@ class Diffusion:
         model_kwargs['self_conditions'] = torch.zeros(xt.shape[0], xt.shape[1], self.vocab_size, device=device)
         if np.random.uniform() > 0.5:
             with torch.no_grad():
-                model_output = backbone(xt, **model_kwargs)['out']
+                model_output = self.backbone(xt, **model_kwargs)['out']
             model_kwargs['self_conditions'] = model_output.detach()
     
     model_output = (
-        backbone(xt, **model_kwargs)['out']
+        self.backbone(xt, **model_kwargs)['out']
         if self.config['custom_loss'] else
         self.forward(xt, sigma[:, None], model_kwargs=model_kwargs)[0]
     )

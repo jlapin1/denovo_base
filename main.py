@@ -4,6 +4,9 @@ import sys
 import utils as U
 import wandb
 from models.model_runners import *
+from accelerate import Accelerator
+
+accelerator = Accelerator()
 
 def main():
      ##############
@@ -47,7 +50,7 @@ def main():
         rddir = os.path.join(config['prev_wts'])
         if config['new_exp']:
             svdir = os.path.join('save', timestamp)
-            if not config['eval_only']:
+            if (not config['eval_only']) and accelerator.is_local_main_rocess:
                 U.create_experiment(svdir, svwts=config['save_weights'])
                 print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
         else:
@@ -71,11 +74,12 @@ def main():
             config[key] = config_[key]
             
     # Create new experiment
-    elif config['save_weights'] and not config['eval_only']:
+    elif config['save_weights'] and (not config['eval_only']) and accelerator.is_local_main_process:
         rddir = None
         svdir = os.path.join('save', timestamp)
-        U.create_experiment(svdir, svwts=config['save_weights'])
-        print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+        if accelerator.is_main_process:
+            U.create_experiment(svdir, svwts=config['save_weights'])
+            print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
     else:
         rddir = None
         svdir = './'
@@ -111,7 +115,7 @@ def main():
         D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)
 
     # WandB
-    if config['log_wandb'] and (config['eval_only'] == False):
+    if config['log_wandb'] and (config['eval_only'] == False) and accelerator.is_local_main_process:
         wandb.init(
             project=config['wandb_project'],
             entity=config['wandb_entity'],
@@ -176,10 +180,12 @@ def main():
                     df.to_parquet(eval_out_path)
             print("\n", out)
     else:
-        print("Test validation", end='')
-        out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-        assert D.config['high_score'] in out.keys()
-        print("\rTest validation passed")
+        if accelerator.is_local_main_process:
+            print("Test validation", end='')
+            out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+            assert D.config['high_score'] in out.keys()
+            print("\rTest validation passed")
+        accelerator.wait_for_everyone()
         print(D.TrainEval()[-1])
 
 if __name__ == '__main__':
