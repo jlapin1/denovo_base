@@ -196,6 +196,7 @@ class Seq2SeqDiff(Seq2Seq):
             encoder_config=encoder_config,
             top_peaks=top_peaks,
         )
+        self.diff_config = diff_config
         decoder_config['kv_indim'] = self.encoder.run_units
         self.diff_obj = create_diffusion(**diff_config)
         self.decoder = DenovoDiffusionDecoder(
@@ -220,7 +221,7 @@ class Seq2SeqDiff(Seq2Seq):
         out.mean().backward()
         return latent.grad * scale
 
-    def forward(self, batch, save_xcur=False, save_xstart=False, cond_fn=None, progress=False):
+    def forward_eval(self, batch, save_xcur=False, save_xstart=False, cond_fn=None, progress=False):
         embedding = self.encoder_embedding(batch)
         output = self.decoder.predict_sequence(
             embedding, 
@@ -231,6 +232,26 @@ class Seq2SeqDiff(Seq2Seq):
             progress=progress,
         )
         return output
+
+    def forward(self, batch, target, global_step, timesteps):
+        embedding = self.encoder_embedding(batch)
+        model_kwargs = {
+            'input_ids': None,
+            'decoder_input_ids': target,
+            'charge': batch['charge'] if 'charge' in batch else None,
+            'mass': batch['mass'] if 'mass' in batch else None,
+            'kv_feats': embedding['emb'],
+        }
+        if self.diff_config['use_loss_mask']:
+            model_kwargs['loss_mask'] = loss_mask # THIS RUINS EVERYTHING
+        losses = self.diff_obj.training_losses(
+            self.decoder,
+            global_step,
+            timesteps,
+            model_kwargs=model_kwargs,
+            noise=None
+        )
+        return losses
 
     def predict_sequence(
         self,
@@ -252,7 +273,7 @@ class Seq2SeqDiff(Seq2Seq):
 
         full_size = bs*n
         batch = expand_batch(batch, n=n)
-        diffout = self(
+        diffout = self.forward_eval(
             batch, 
             save_xcur=save_xcur, 
             save_xstart=save_xstart, 

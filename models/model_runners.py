@@ -666,6 +666,7 @@ class DenovoArDSObj(BaseDenovo):
             top_peaks      = config['top_peaks'],
         )
         
+
         print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
 
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
@@ -674,9 +675,15 @@ class DenovoArDSObj(BaseDenovo):
         
         # loading previous weights
         self.restore_model()
-                
-        self.model.to(device)
-    
+        
+        # loading previous weights
+        self.restore_model()
+        
+        self.accelerate()
+
+        if self.accelerator.is_local_main_process:
+            print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+
     def inptarg(self, batch):
         
         bs, sl = batch['intseq'].shape
@@ -707,18 +714,18 @@ class DenovoArDSObj(BaseDenovo):
         return loss
 
     def train_step(self, batch, trenc=True):
-        batch = U.Dict2dev(batch, device)
+        #batch = U.Dict2dev(batch, device)
         #enc_input, seqint, target = self.inptarg(batch)
         dec_input, target, loss_mask = self.inptarg(batch)
         
-        self.model.to(device)
-        self.model.train()
-        self.model.zero_grad()
-        logits = self.model(dec_input, batch)
+        #self.model.to(device)
+        self._model.train()
+        self._model.zero_grad()
+        logits = self._model(dec_input, batch)
         all_loss = self.LossFunction(target, logits, loss_mask)
         loss = all_loss.mean()
         
-        loss.backward()
+        self.accelerator.backward(loss)
         
         self.update_lr()
         self.opt.step()
@@ -771,8 +778,9 @@ class DenovoDiffusionObj(BaseDenovo):
         
         # loading previous weights
         self.restore_model()
-                
-        self.model.to(device)
+        
+        #self.model.to(device)
+        self.accelerate()
 
         # Classifier
         classifier_config = config['classifier_config']
@@ -814,13 +822,13 @@ class DenovoDiffusionObj(BaseDenovo):
         return timesteps, target, loss_mask
 
     def train_step(self, batch):
-        batch = U.Dict2dev(batch, device)
+        #batch = U.Dict2dev(batch, device)
         timesteps, target, loss_mask = self.inptarg(batch)
 
-        self.model.to(device)
-        self.model.train()
-        self.model.zero_grad()
-        
+        #self.model.to(device)
+        self._model.train()
+        self._model.zero_grad()
+        """
         embedding = self.model.encoder_embedding(batch)
         
         model_kwargs = {
@@ -839,10 +847,11 @@ class DenovoDiffusionObj(BaseDenovo):
             timesteps, 
             model_kwargs=model_kwargs, 
             noise=None
-        )
+        )"""
+        losses = self._model(batch, target, self.global_step, timesteps)
         
         loss = losses['loss'].mean()
-        loss.backward()
+        self.accelerator.backward(loss)
         with th.no_grad():
             losses = {key: loss.mean().detach().cpu().item() for key, loss in losses.items()}
         
@@ -1036,14 +1045,15 @@ class DenovoMDLMObj(BaseDenovo):
         } | losses)
 
     def on_train_epoch_end(self):
-        if self.log:
-            try:
-                avg_loss = self.token_loss / (self.token_count+1e-5)
-                avg_loss = avg_loss.cpu().detach().numpy()
-                np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
-                self.initialize_token_loss()
-            except:
-                pass
+        pass
+        #if self.log:
+        #    try:
+        #        avg_loss = self.token_loss / (self.token_count+1e-5)
+        #        avg_loss = avg_loss.cpu().detach().numpy()
+        #        np.savetxt(os.path.join(self.svdir, "token_loss.tsv"), avg_loss, delimiter='\t')
+        #        self.initialize_token_loss()
+        #    except:
+        #        pass
 
 class DenovoD3PMObj(BaseDenovo):
     def __init__(self, config, svdir='./save/', rddir=None):
