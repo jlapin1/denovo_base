@@ -916,6 +916,15 @@ class DenovoMDLMObj(BaseDenovo):
         
         return None, target, loss_mask
 
+    def dropout_attributes(self, batch):
+        batch_size = batch['mass'].shape[0]
+        if self.model.decoder.diff_obj.use_guidance:
+            dropout_mask = th.rand(batch_size) < self.diff_config['guidance']['p_uncond']
+            if 'mass' in batch: batch['mass'][dropout_mask] = 0.
+            if 'charge' in batch: batch['charge'][dropout_mask] = 0
+            if 'kv_features' in batch: batch['kv_features'][dropout_mask] = 0.
+        return batch
+
     def train_step(self, batch):
         block_decoding = True if self.model.decoder.block_size is not None else False
         batch = U.Dict2dev(batch, device)
@@ -935,6 +944,7 @@ class DenovoMDLMObj(BaseDenovo):
             'seqmask': training_mask,
             'doubled': True if block_decoding else False,
         }
+        model_kwargs = self.dropout_attributes(model_kwargs)
         
         backbone = self.model.decoder
         if self.diff_config['custom_loss']:
