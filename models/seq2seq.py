@@ -323,6 +323,7 @@ class Seq2SeqMDLM(Seq2Seq):
             **decoder_config,
         )
         # Diffusion object
+        self.diff_config = diff_config
         self.diff_obj = MDLMDiffusion(diff_config, self.decoder.outdict, self.decoder)
         self.decoder.diff_obj = self.diff_obj
 
@@ -349,6 +350,15 @@ class Seq2SeqMDLM(Seq2Seq):
         aa_entropy = (entropy*reveal_mask).sum(dim=1) / (reveal_mask.sum(dim=1)+1e-9) # average over masked tokens
         pep_entropy = (aa_entropy*sl_mask).sum(dim=-1) / (sl_mask.sum(dim=-1)+1e-9) # average over sequence length
         return aa_entropy, pep_entropy
+    
+    def dropout_attributes(self, batch):
+        batch_size = batch['mass'].shape[0]
+        if self.diff_obj.use_guidance:
+            dropout_mask = th.rand(batch_size) < self.diff_config['guidance']['p_uncond']
+            if 'mass' in batch: batch['mass'][dropout_mask] = 0.
+            if 'charge' in batch: batch['charge'][dropout_mask] = 0
+            #if 'kv_features' in batch: batch['kv_features'][dropout_mask] = 0.
+        return batch
 
     def forward_eval(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
         dictionary = self.encoder_embedding(batch)
@@ -368,6 +378,7 @@ class Seq2SeqMDLM(Seq2Seq):
             'seqmask': training_mask,
             'doubled': True if block_decoding else False,
         }
+        model_kwargs = self.dropout_attributes(model_kwargs)
         return self.decoder.diff_obj._forward_pass_diffusion(target, model_kwargs, block_decoding)
 
     def predict_sequence(

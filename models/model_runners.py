@@ -984,23 +984,11 @@ class DenovoMDLMObj(BaseDenovo):
 
     def train_step(self, batch):
         block_decoding = True if self.model.decoder.block_size is not None else False
-        #batch = U.Dict2dev(batch, device)
         _, target, loss_mask = self.inptarg(batch)
         training_mask = self.FullBlockMask(target.shape[1], self.model.decoder.block_size, True)[None,None] if block_decoding else None
         
-        #self.model.to(device)
         self._model.train()
         self._model.zero_grad()
-        
-        #embedding = self._model.module.encoder_embedding(batch)
-        
-        #model_kwargs = {
-        #    'charge': batch['charge'] if 'charge' in batch else None,
-        #    'mass': batch['mass'] if 'mass' in batch else None,
-        #    'kv_features': embedding['emb'],
-        #    'seqmask': training_mask,
-        #    'doubled': True if block_decoding else False,
-        #}
         
         # accelerate ONLY works when the train_step calls the most proximate model's (seq2seq) forward function.
         # - That is what is returned by accelerate's prepare function
