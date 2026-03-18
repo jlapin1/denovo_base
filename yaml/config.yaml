@@ -1,4 +1,4 @@
-eval_only: True
+eval_only: False
 inference: False
 batch_size: 100
 top_peaks: 100
@@ -23,7 +23,7 @@ lr_decay_steps: 2250000 # 1000000
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: save/2026-03-09_08-35-33 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: True
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights

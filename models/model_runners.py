@@ -922,7 +922,8 @@ class DenovoMDLMObj(BaseDenovo):
             dropout_mask = th.rand(batch_size) < self.diff_config['guidance']['p_uncond']
             if 'mass' in batch: batch['mass'][dropout_mask] = 0.
             if 'charge' in batch: batch['charge'][dropout_mask] = 0
-            if 'kv_features' in batch: batch['kv_features'][dropout_mask] = 0.
+            if 'mz' in batch: batch['mz'][dropout_mask] = 0.
+            if 'ab' in batch: batch['ab'][dropout_mask] = 0.
         return batch
 
     def train_step(self, batch):
@@ -935,6 +936,7 @@ class DenovoMDLMObj(BaseDenovo):
         self.model.train()
         self.model.zero_grad()
         
+        batch = self.dropout_attributes(batch)
         embedding = self.model.encoder_embedding(batch)
         
         model_kwargs = {
