@@ -320,6 +320,7 @@ class Seq2SeqMDLM(Seq2Seq):
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
             decoder_config      = decoder_config,
+            use_guidance        = diff_config['guidance']['p_uncond']>0,
             **decoder_config,
         )
         # Diffusion object

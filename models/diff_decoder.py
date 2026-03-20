@@ -64,6 +64,7 @@ class base_diffusion_decoder(nn.Module):
         use_charge=True,
         use_mass=True,
         use_leftover=False,
+        use_guidance=False,
         precursor_dimension=128,
     ):
         super(base_diffusion_decoder, self).__init__()
@@ -83,6 +84,7 @@ class base_diffusion_decoder(nn.Module):
         self.use_mass = use_mass
         self.use_leftover = use_leftover
         self.use_charge = use_charge
+        self.use_guidance = use_guidance
                 
         self.precursor_dimension = precursor_dimension
         
@@ -109,15 +111,17 @@ class base_diffusion_decoder(nn.Module):
                 self.charge_features = lambda charge: (
                     mp.FourierFeatures(charge, 1, 10, precursor_dimension)
                 )
-                self.charge_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
+                if use_guidance:
+                    self.charge_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
             if use_mass | use_leftover:
                 self.mass_features = lambda mass: (
                     mp.FourierFeatures(mass, 0.001, 10000, precursor_dimension)
                 )
-                if use_mass:
-                    self.mass_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
-                if use_leftover:
-                    self.leftover_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
+                if use_guidance:
+                    if use_mass:
+                        self.mass_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
+                    if use_leftover:
+                        self.leftover_sub_vector = nn.Parameter(I.normal_(th.zeros(precursor_dimension), 0, 0.03), requires_grad=True)
             self.precursor_emb = nn.Sequential(
                 nn.Linear(precursor_dimension*num, running_units)
             )
@@ -191,17 +195,17 @@ class base_diffusion_decoder(nn.Module):
             if self.use_charge:
                 charge = charge.type(th.float32)
                 charge_features = self.charge_features(charge)
-                charge_features[charge==0] = self.charge_sub_vector[None]
+                if self.use_guidance: charge_features[charge==0] = self.charge_sub_vector[None]
                 ce_emb.append(charge_features)
             if self.use_mass:
                 mass_features = self.mass_features(mass)
-                mass_features[mass==0] = self.mass_sub_vector[None]
+                if self.use_guidance: mass_features[mass==0] = self.mass_sub_vector[None]
                 ce_emb.append(mass_features)
             if self.use_leftover:
                 mass_so_far = self.scale.intseq2mz(seq, charge)
                 leftover_mass = mass - mass_so_far
                 leftover_features = self.mass_features(leftover_mass)
-                leftover_features[charge==0] = self.leftover_sub_vector[None]
+                if self.use_guidance: leftover_features[charge==0] = self.leftover_sub_vector[None]
                 ce_emb.append(leftover_features)
             if len(ce_emb) > 1:
                 ce_emb = th.cat(ce_emb, dim=-1)
@@ -258,6 +262,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
         alphabet=False,
         use_charge=False,
         use_mass=False,
+        use_guidance=False,
         prenorm=False,
         self_condition=True,
         output_sigma=False,
@@ -280,6 +285,7 @@ class DenovoDiffusionDecoder(base_diffusion_decoder):
             kv_input_dimension=dec_config['kv_indim'],
             use_charge=use_charge,
             use_mass=use_mass,
+            use_guidance=use_guidance,
             precursor_dimension=precursor_dimension,
         )
         self.create_inpdict(token_dict)
@@ -451,6 +457,7 @@ class MDLMDecoder(base_diffusion_decoder):
         use_charge=False,
         use_mass=False,
         use_leftover=False,
+        use_guidance=False,
         prenorm=False,
         embed_type=None,
         self_condition=True,
@@ -476,6 +483,7 @@ class MDLMDecoder(base_diffusion_decoder):
             use_charge=use_charge,
             use_mass=use_mass,
             use_leftover=use_leftover,
+            use_guidance=use_guidance,
             precursor_dimension=precursor_dimension,
         )
         self.finish_dict()
