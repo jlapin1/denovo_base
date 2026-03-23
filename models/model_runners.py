@@ -83,6 +83,8 @@ class BaseDenovo:
             **self.config['loader']
         )
         
+        self.training_mode = 'normal'
+
         self.training_loss_keys = []
         self.eval_stats = []
         self.eval_kwargs = {}
@@ -109,7 +111,7 @@ class BaseDenovo:
 
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
-        print(f"<DSCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
+        print(f"<MRCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
         possible_weights_path = glob(os.path.join(self.rddir, "weights", regex))
         
         # Found something
@@ -129,7 +131,7 @@ class BaseDenovo:
                     weights_path = [m for m in glob(possible_weights_path) if 'last' in m][0]
                     qualifier = '"last"'
             
-            print(f"<DSCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
+            print(f"<MRCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
             obj.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
             if retain:
@@ -166,7 +168,6 @@ class BaseDenovo:
         gradient_accumulation_steps = self.accelerator.gradient_accumulation_steps
         self.global_batch_size = local_batch_size * num_processes * gradient_accumulation_steps
         #if self.accelerator.is_local_main_process:
-        #    
         #    print("Batch size", local_batch_size)
         #    print("Num processes", num_processes)
         #    print("Accumulation steps", gradient_accumulation_steps)
@@ -175,7 +176,10 @@ class BaseDenovo:
 
     def split_labels_str(self, incl_str):
         return [label for label in self.dl.labels if incl_str in label]
-    
+
+    def make_reference_model(self, freeze=True):
+        self.model.make_reference_model(freeze=freeze)
+
     def train_epoch(self, svfreq=10000):
         
         bs = self.global_batch_size #config['batch_size']
@@ -199,7 +203,7 @@ class BaseDenovo:
                 wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
             self.accelerator.wait_for_everyone()
             
-            losses = self.train_step(batch)
+            losses = self.train_step(batch) if self.training_mode=='normal' else self.rl_step(batch)
             total_loss = losses['loss']
             self.global_step += 1
             
@@ -647,7 +651,7 @@ class BaseDenovo:
     def on_eval_end(self, *args, **kwargs):
         pass
 
-class DenovoArDSObj(BaseDenovo):
+class DenovoArObj(BaseDenovo):
     def __init__(self, config, svdir='./dswts/', rddir=None):
         super().__init__(
             config=config,
@@ -667,7 +671,7 @@ class DenovoArDSObj(BaseDenovo):
         )
         
 
-        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+        print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
 
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
 
@@ -682,7 +686,10 @@ class DenovoArDSObj(BaseDenovo):
         self.accelerate()
 
         if self.accelerator.is_local_main_process:
-            print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+            print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+
+        if self.config['rl']:
+            self.make_reference_model()
 
     def inptarg(self, batch):
         
@@ -773,7 +780,7 @@ class DenovoDiffusionObj(BaseDenovo):
             masses_path = config['loader']['masses_path'],
         )
 
-        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+        print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
         
         # loading previous weights
@@ -909,6 +916,8 @@ class DenovoMDLMObj(BaseDenovo):
         self.eval_kwargs = {}
 
         from models.seq2seq import Seq2SeqMDLM
+        self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
+        self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token)#.to(device)
         
         diff_config = config['decoder_mdlm']['diffusion_config']
         self.diff_config = diff_config
@@ -939,14 +948,19 @@ class DenovoMDLMObj(BaseDenovo):
         # loading previous weights
         self.restore_model()
         
+        if self.config['rl']:
+            self.training_mode = 'rl'
+            self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
+            self.make_reference_model()
+            print(f"<MRCOMMENT> Reference model created for reinforcement learning")
+        else:
+            self.training_mode = 'normal'
+
         #self.model.to(device)
         self.accelerate()
 
         if self.accelerator.is_local_main_process:
-            print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
-
-        self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
-        self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token)#.to(device)
+            print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
 
     def initialize_token_loss(self):
         self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
@@ -1023,6 +1037,17 @@ class DenovoMDLMObj(BaseDenovo):
         self.opt.step()
                 
         return losses
+
+    def rl_step(self, batch):
+        self._model.train()
+        self._model.zero_grad()
+        _, target, loss_mask = self.inptarg(batch)
+        loss = self._model(batch, target, None, False, rl=True)
+        loss = loss.mean()
+        self.accelerator.backward(loss)
+        self.update_lr()
+        self.opt.step()
+        return {'loss': loss.item()}
     
     def log_wandb(self, losses, grad_norm):
         loss = losses.pop('loss')
@@ -1077,7 +1102,7 @@ class DenovoD3PMObj(BaseDenovo):
         )
 
         # Optimizer
-        print(f"<DSCOMMENT> Total model parameters: {self.model.total_params():,}")
+        print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
 
         self.restore_model()

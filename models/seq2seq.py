@@ -1,5 +1,6 @@
 import torch as th
 from torch import nn
+from torch.nn import functional as F
 from models.encoder import Encoder
 from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder, D3PMDecoder
 from models.decoder import DenovoDecoder
@@ -7,9 +8,12 @@ from models.diffusion.model_utils import create_diffusion
 from models.mdlm.diffusion import Diffusion as MDLMDiffusion
 from models.d3pm import D3PM
 import os
+from copy import deepcopy
+import numpy as np
 
 device = th.device('cuda' if th.cuda.is_available() else 'cpu')
 total_aa_mass = lambda m_z, charge: (m_z - 1.00727646688)*charge - 18.010565
+reinforcement_subs = list("ACDEFGHIKLMNPQRSTVWY")
 def find_winners(seqs, masses_ref, exp_mz, charges, n, mass_tol, return_full=False):
     bs = seqs.shape[0] // n
     seqs_rs = seqs.reshape(bs, n, -1)
@@ -138,6 +142,12 @@ class Seq2Seq(nn.Module):
         encoder_input = self.encinp(batch)
         embedding = self.encoder(**encoder_input)
         return embedding
+
+    def make_reference_model(self, freeze=True):
+        self.refmodel = deepcopy(self.decoder)
+        if freeze:
+            for param in self.refmodel.parameters():
+                param.requires_grad = False
 
     def forward(self, *args, **kwargs):
         pass
@@ -333,6 +343,8 @@ class Seq2SeqMDLM(Seq2Seq):
         # Scale
         if 'masses_path' in kwargs:
             self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+
+        self.rl_subs = [value for key, value in token_dict.items() if key[0] in reinforcement_subs]
     
     def get_reveal_steps(self, x_in_time):
         trajectory_length = x_in_time.shape[1]
@@ -368,7 +380,8 @@ class Seq2SeqMDLM(Seq2Seq):
         decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
         return decout
 
-    def forward(self, batch, target, training_mask=None, block_decoding=False):
+    def forward(self, batch, target, training_mask=None, block_decoding=False, rl=False):
+        forward_function = self.contrastive_loss if rl else self.decoder.diff_obj._forward_pass_diffusion
         dictionary = self.encoder_embedding(batch)
         embedding = dictionary['emb']
         spectrum_mask = dictionary['mask']
@@ -380,7 +393,7 @@ class Seq2SeqMDLM(Seq2Seq):
             'doubled': True if block_decoding else False,
         }
         model_kwargs = self.dropout_attributes(model_kwargs)
-        return self.decoder.diff_obj._forward_pass_diffusion(target, model_kwargs, block_decoding)
+        return forward_function(target, model_kwargs, block_decoding)
 
     def predict_sequence(
         self, 
@@ -429,6 +442,73 @@ class Seq2SeqMDLM(Seq2Seq):
 
         return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
         return return_
+
+    def generate_negative(self, xt, x0, sub_rate=0.2):
+        original_masses = self.masses.to(x0.device)[None].tile([x0.shape[0], 1]).gather(-1, x0).sum(-1)
+        xl = x0.clone()
+
+        peptide_lengths = (x0!=self.decoder.NT).sum(1)-1
+        grid = th.arange(xl.shape[1]).to(xl.device)[None].tile([xl.shape[0], 1])
+        
+        # Find non-isobaric sequence
+        scores = ((xt == self.decoder.MASK)&(grid < peptide_lengths[:,None])).float() # preferred masked non-null tokens
+        scores *= th.rand_like(scores) # sample
+        fillinds = (peptide_lengths * th.rand_like(peptide_lengths.float())).floor().int()
+        sample = scores > (1-sub_rate) # sample
+        nada = sample.sum(1)==0
+        sample[nada, fillinds[nada]] = True
+        seqinds = th.where(sample)
+
+        tochange = xl[seqinds]
+        x = tochange.clone()
+        alive = x==tochange
+        while not (x!=tochange).all():
+            x[alive] = th.tensor(np.random.choice(self.rl_subs, (alive.sum(),)), device=xl.device)
+            alive = x==tochange
+        xl[seqinds] = x
+        
+        new_masses  = self.masses.to(xl.device)[None].tile([xl.shape[0], 1]).gather(-1, xl).sum(-1)
+        delta_mass = new_masses - original_masses
+        return xl, delta_mass
+
+    def contrastive_loss(self, x0, model_kwargs, *args, beta=0.1, **kwargs):
+
+        # Set up all variables: xt, timesteps, self_conditions
+        bs, sl = x0.shape
+        device = x0.device
+        t = self.diff_obj._sample_t(bs, device)
+        sigma, dsigma = self.diff_obj.noise(t)
+        model_kwargs['timesteps'] = sigma if self.diff_obj.time_conditioning else th.zeros_like(sigma)
+        move_chance = 1 - th.exp(-sigma[:, None])
+        xt = self.diff_obj.q_xt(x0, move_chance)
+        masked_mask = xt==self.diff_obj.mask_index
+        xl, delta_mass = self.generate_negative(xt, x0)
+        
+        if self.diff_obj.config['model']['self_condition']:
+            model_kwargs['self_conditions'] = th.zeros(xt.shape[0], xt.shape[1], self.diff_obj.vocab_size, device=device)
+            if np.random.uniform() > 0.5:
+                with th.no_grad():
+                    model_output = self.decoder(xt, **model_kwargs)['out']
+        
+        # Get logits from both models
+        logits_policy = self.decoder(xt, **model_kwargs)['out']
+        logits_ref = self.refmodel(xt, **model_kwargs)['out']
+
+        # Extract Log-Probs for the correct categories of masked tokens
+        lp_win_policy = logits_policy.gather(-1, x0[...,None]).squeeze(-1)
+        lp_win_ref = logits_ref.gather(-1, x0[...,None]).squeeze(-1)
+
+        # xl
+        lp_loss_policy = logits_policy.gather(-1, xl[...,None]).squeeze(-1)
+        lp_loss_ref = logits_ref.gather(-1, xl[...,None]).squeeze(-1)
+
+        # DPO Contrastive Objective
+        prob_ratio_win = lp_win_policy - lp_win_ref
+        prob_ratio_loss = lp_loss_policy - lp_loss_ref
+        
+        weights = th.log1p(delta_mass.abs())
+        loss = -F.logsigmoid(beta * (prob_ratio_win - prob_ratio_loss)) # (win-loss) must be larger for lower beta to get same loss as larger beta
+        return (weights[:,None] * loss)[masked_mask]
 
 class Seq2SeqD3PM(Seq2Seq):
     def __init__(

@@ -52,7 +52,7 @@ def main():
             svdir = os.path.join('save', timestamp)
             if (not config['eval_only']) and accelerator.is_local_main_rocess:
                 U.create_experiment(svdir, svwts=config['save_weights'])
-                print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+                print("<MAINCOMMENT> Experiment is writing to directory %s"%svdir)
         else:
             svdir = os.path.join(config['prev_wts'])
             timestamp = config['prev_wts']
@@ -63,7 +63,7 @@ def main():
             'epochs', 'prev_wts', 'load_last', 'lr_schedule',
             'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
             'lr_flat_steps', 'lr_floor', 'lr_decay_steps',
-            'loader', 'log_wandb', 'eval_only', 'batch_size',
+            'loader', 'log_wandb', 'eval_only', 'batch_size', 'rl',
             'top_peaks', 'classifier_config', 'new_exp', 'inference',
         ]:
             if key == 'loader':
@@ -79,7 +79,7 @@ def main():
         svdir = os.path.join('save', timestamp)
         if accelerator.is_main_process:
             U.create_experiment(svdir, svwts=config['save_weights'])
-            print("<DSCOMMENT> Experiment is writing to directory %s"%svdir)
+            print("<MAINCOMMENT> Experiment is writing to directory %s"%svdir)
     else:
         rddir = None
         svdir = './'
@@ -100,19 +100,19 @@ def main():
     # Downstream object #
     #####################
 
-    print("<DSCOMMENT> Denovo sequencing")
+    print("<MAINCOMMENT> Denovo sequencing")
     if 'diff' in config['decoder_name']:
-        print("<DSCOMMENT> Using diffusion decoder")
+        print("<MAINCOMMENT> Using diffusion decoder")
         D = DenovoDiffusionObj(config, svdir=svdir, rddir=rddir)
     elif 'mdlm' in config['decoder_name']:
-        print("<DSCOMMENT> Using masked diffusion language decoder")
+        print("<MAINCOMMENT> Using masked diffusion language decoder")
         D = DenovoMDLMObj(config, svdir=svdir, rddir=rddir)
     elif 'd3pm' in config['decoder_name']:
-        print("<DSCOMMENT> Using D3PM")
+        print("<MAINCOMMENT> Using D3PM")
         D = DenovoD3PMObj(config, svdir=svdir, rddir=rddir)
     else:
-        print("<DSCOMMENT> Using autoregressive decoder")
-        D = DenovoArDSObj(config, svdir=svdir, rddir=rddir)
+        print("<MAINCOMMENT> Using autoregressive decoder")
+        D = DenovoArObj(config, svdir=svdir, rddir=rddir)
 
     # WandB
     if config['log_wandb'] and (config['eval_only'] == False) and accelerator.is_local_main_process:
