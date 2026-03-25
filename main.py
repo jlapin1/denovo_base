@@ -50,7 +50,7 @@ def main():
         rddir = os.path.join(config['prev_wts'])
         if config['new_exp']:
             svdir = os.path.join('save', timestamp)
-            if (not config['eval_only']) and accelerator.is_local_main_rocess:
+            if (not config['eval_only']) and accelerator.is_local_main_process:
                 U.create_experiment(svdir, svwts=config['save_weights'])
                 print("<MAINCOMMENT> Experiment is writing to directory %s"%svdir)
         else:
