@@ -9,19 +9,24 @@ from copy import deepcopy
 import datetime
 import re
 import os
+import yaml
 
 def timestamp():
     dt = str(datetime.datetime.now()).split()
     dt[-1] = re.sub(':', '-', dt[-1]).split('.')[0]
     return "_".join(dt)
 
-def create_experiment(directory, svwts=False):
+def create_experiment(directory, svwts=False, config=None):
     os.mkdir(directory)
     os.mkdir('%s/yaml'%directory)
     os.system("cp ./yaml/*.yaml %s/yaml/"%directory)
     if svwts: 
         os.mkdir('%s/weights'%directory)
         os.mkdir(f'{directory}/weights/save')
+    if config:
+        os.system(f"mv {os.path.join(directory, 'yaml', 'config.yaml')} {os.path.join(directory, 'yaml', 'config_.yaml')}")
+        with open(os.path.join(directory, 'yaml', 'config.yaml'), 'w') as file:
+            yaml.dump(config, file)
 
 def message_board(line, path):
     with open(path, 'a') as F:
