@@ -144,9 +144,9 @@ class Seq2Seq(nn.Module):
         return embedding
 
     def make_reference_model(self, freeze=True):
-        self.refmodel = [deepcopy(self.decoder)]
+        self.refmodel = deepcopy(self.decoder)
         if freeze:
-            for param in self.refmodel[0].parameters():
+            for param in self.refmodel.parameters():
                 param.requires_grad = False
 
     def forward(self, *args, **kwargs):
@@ -492,7 +492,7 @@ class Seq2SeqMDLM(Seq2Seq):
         
         # Get logits from both models
         logits_policy = self.decoder(xt, **model_kwargs)['out']
-        logits_ref = self.refmodel[0](xt, **model_kwargs)['out']
+        logits_ref = self.refmodel(xt, **model_kwargs)['out']
 
         # Extract Log-Probs for the correct categories of masked tokens
         lp_win_policy = logits_policy.gather(-1, x0[...,None]).squeeze(-1)

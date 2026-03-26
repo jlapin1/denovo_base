@@ -91,7 +91,9 @@ class BaseDenovo:
 
     def save_weights(self, fp='./model.wts'):
         unwrapped_model = self.accelerator.unwrap_model(self._model)
-        th.save(unwrapped_model.state_dict(), fp)
+        state_dict = unwrapped_model.state_dict()
+        state_dict = self.on_save_model_start(state_dict)
+        th.save(state_dict, fp)
     
     def save_last(self, override=False):
         ready = self.global_step - self.save_last_counter >= self.config['save_last_freq']
@@ -651,6 +653,9 @@ class BaseDenovo:
     def on_eval_end(self, *args, **kwargs):
         pass
 
+    def on_save_model_start(self, state_dict):
+        return state_dict
+
 class DenovoArObj(BaseDenovo):
     def __init__(self, config, svdir='./dswts/', rddir=None):
         super().__init__(
@@ -1067,6 +1072,13 @@ class DenovoMDLMObj(BaseDenovo):
         #        self.initialize_token_loss()
         #    except:
         #        pass
+
+    def on_save_model_start(self, state_dict):
+        keys = list(state_dict.keys())
+        for key in keys:
+            if 'refmodel' in key:
+                del state_dict[key]
+        return state_dict
 
 class DenovoD3PMObj(BaseDenovo):
     def __init__(self, config, svdir='./save/', rddir=None):

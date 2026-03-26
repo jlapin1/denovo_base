@@ -28,12 +28,12 @@ prev_wts: /cmnfs/proj/diffusion/experiments/2026-03-06_22-58-14 # Load weights f
 load_last: False
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
-eval_frequency: 5400
+eval_frequency: 3600
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
 wandb_project: diffusion
 
