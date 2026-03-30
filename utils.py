@@ -278,9 +278,10 @@ class Scale:
         int2mass = np.zeros((len(amod_dict)))
         for aa, integer in amod_dict.items():
             split = re.split('[+\-_]', aa)
+            multiplier = -1 if len(re.findall('\-', aa)) > 0 else 1
             if len(split) == 2:
                 aa, modwt = split
-                int2mass[integer] = masses.get(aa,0) + eval(modwt)
+                int2mass[integer] = masses.get(aa,0) + multiplier*eval(modwt)
             else:
                 if aa in masses.keys():
                     int2mass[integer] = masses[aa]
