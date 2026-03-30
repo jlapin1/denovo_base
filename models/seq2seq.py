@@ -457,6 +457,7 @@ class Seq2SeqMDLM(Seq2Seq):
         sample = scores > (1-sub_rate) # sample
         nada = sample.sum(1)==0
         sample[nada, fillinds[nada]] = True
+        xt[nada, fillinds[nada]] = self.decoder.MASK
         seqinds = th.where(sample)
 
         tochange = xl[seqinds]
@@ -469,7 +470,8 @@ class Seq2SeqMDLM(Seq2Seq):
         
         new_masses  = self.masses.to(xl.device)[None].tile([xl.shape[0], 1]).gather(-1, xl).sum(-1)
         delta_mass = new_masses - original_masses
-        return xl, delta_mass
+        masked_mask = (xt == self.decoder.MASK) & (x0!=xl)
+        return xl, xt, delta_mass, masked_mask
 
     def contrastive_loss(self, x0, model_kwargs, *args, beta=0.1, **kwargs):
 
@@ -481,33 +483,35 @@ class Seq2SeqMDLM(Seq2Seq):
         model_kwargs['timesteps'] = sigma if self.diff_obj.time_conditioning else th.zeros_like(sigma)
         move_chance = 1 - th.exp(-sigma[:, None])
         xt = self.diff_obj.q_xt(x0, move_chance)
-        masked_mask = xt==self.diff_obj.mask_index
-        xl, delta_mass = self.generate_negative(xt, x0)
+        xl, xt, delta_mass, masked_mask = self.generate_negative(xt, x0)
         
         if self.diff_obj.config['model']['self_condition']:
             model_kwargs['self_conditions'] = th.zeros(xt.shape[0], xt.shape[1], self.diff_obj.vocab_size, device=device)
             if np.random.uniform() > 0.5:
                 with th.no_grad():
                     model_output = self.decoder(xt, **model_kwargs)['out']
+                model_kwargs['self_conditions'] = model_output.detach()
         
-        # Get logits from both models
-        logits_policy = self.decoder(xt, **model_kwargs)['out']
-        logits_ref = self.refmodel(xt, **model_kwargs)['out']
+        # Get log(probabilities) from both models
+        logprobs_policy = self.decoder(xt, **model_kwargs)['out'].log_softmax(dim=-1)
+        with th.no_grad():
+            logprobs_ref = self.refmodel(xt, **model_kwargs)['out'].log_softmax(dim=-1)
 
         # Extract Log-Probs for the correct categories of masked tokens
-        lp_win_policy = logits_policy.gather(-1, x0[...,None]).squeeze(-1)
-        lp_win_ref = logits_ref.gather(-1, x0[...,None]).squeeze(-1)
+        lp_win_policy = logprobs_policy.gather(-1, x0[...,None]).squeeze(-1)
+        lp_win_ref = logprobs_ref.gather(-1, x0[...,None]).squeeze(-1)
 
         # xl
-        lp_loss_policy = logits_policy.gather(-1, xl[...,None]).squeeze(-1)
-        lp_loss_ref = logits_ref.gather(-1, xl[...,None]).squeeze(-1)
+        lp_loss_policy = logprobs_policy.gather(-1, xl[...,None]).squeeze(-1)
+        lp_loss_ref = logprobs_ref.gather(-1, xl[...,None]).squeeze(-1)
 
         # DPO Contrastive Objective
-        prob_ratio_win = lp_win_policy - lp_win_ref
-        prob_ratio_loss = lp_loss_policy - lp_loss_ref
+        pi_logratios = lp_win_policy - lp_loss_policy
+        ref_logratios = lp_win_ref - lp_loss_ref
+        logits = pi_logratios - ref_logratios
         
         weights = th.log1p(delta_mass.abs())
-        loss = -F.logsigmoid(beta * (prob_ratio_win - prob_ratio_loss)) # (win-loss) must be larger for lower beta to get same loss as larger beta
+        loss = -F.logsigmoid(beta * logits) # (win-loss) must be larger for lower beta to get same loss as larger beta
         return (weights[:,None] * loss)[masked_mask]
 
 class Seq2SeqD3PM(Seq2Seq):

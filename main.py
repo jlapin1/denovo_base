@@ -19,7 +19,7 @@ def replace_previous_settings(prev_config, update_config):
         'epochs', 'prev_wts', 'load_last', 'lr_schedule',
         'lr_warmup_start', 'lr_warmup_end', 'lr_warmup_steps',
         'lr_flat_steps', 'lr_floor', 'lr_decay_steps','eval_frequency',
-        'loader', 'log_wandb', 'eval_only', 'batch_size', 'rl',
+        'loader', 'log_wandb', 'eval_only', 'batch_size', 'rl', 'save_weights',
         'top_peaks', 'classifier_config', 'new_exp', 'inference',
     ]:
         if key == 'loader':
@@ -80,14 +80,19 @@ def main():
     # Create experiment directory in save/downstream_only/ #
     ########################################################
 
-    # Continuing previous downstream run
+    # Continuing previous downstream run; maybe create new directory
     timestamp = U.timestamp()
     if config['prev_wts'] is not None:
+        # Set the read directory to properly load previous model weights
         rddir = os.path.join(config['prev_wts'])
+        # Reconcile the loaded model's config with the current config in yaml/config.yaml
         with open(os.path.join(config['prev_wts'], "yaml", "config.yaml")) as stream:
             config = yaml.safe_load(stream)
         config = replace_previous_settings(config, config_)
-        if config['new_exp']:
+        # Set the save directory. Perhaps create a new project directory?
+        if not config['save_weights']:
+            svdir = './'
+        elif config['new_exp']:
             svdir = os.path.join('save', timestamp)
             if (not config['eval_only']) and accelerator.is_local_main_process:
                 U.create_experiment(svdir, svwts=config['save_weights'], config=config)
@@ -96,7 +101,7 @@ def main():
             svdir = os.path.join(config['prev_wts'])
             timestamp = config['prev_wts']    
         
-    # Create new experiment
+    # Create new experiment without previous weights
     elif config['save_weights'] and (not config['eval_only']) and accelerator.is_local_main_process:
         rddir = None
         svdir = os.path.join('save', timestamp)
@@ -197,8 +202,8 @@ def main():
     else:
         if accelerator.is_local_main_process:
             print("Test validation", end='')
-            #out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
-            #assert D.config['high_score'] in out.keys()
+            out, _ = D.evaluation(dset='val', max_batches=2, kwargs=D.eval_kwargs)
+            assert D.config['high_score'] in out.keys()
             print("\rTest validation passed")
         accelerator.wait_for_everyone()
         print(D.TrainEval()[-1])
