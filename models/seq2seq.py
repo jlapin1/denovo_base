@@ -470,8 +470,8 @@ class Seq2SeqMDLM(Seq2Seq):
         
         new_masses  = self.masses.to(xl.device)[None].tile([xl.shape[0], 1]).gather(-1, xl).sum(-1)
         delta_mass = new_masses - original_masses
-        masked_mask = (xt == self.decoder.MASK) & (x0!=xl)
-        return xl, xt, delta_mass, masked_mask
+        
+        return xl, xt, delta_mass
 
     def contrastive_loss(self, x0, model_kwargs, *args, beta=0.1, **kwargs):
 
@@ -483,7 +483,7 @@ class Seq2SeqMDLM(Seq2Seq):
         model_kwargs['timesteps'] = sigma if self.diff_obj.time_conditioning else th.zeros_like(sigma)
         move_chance = 1 - th.exp(-sigma[:, None])
         xt = self.diff_obj.q_xt(x0, move_chance)
-        xl, xt, delta_mass, masked_mask = self.generate_negative(xt, x0)
+        xl, xt, delta_mass = self.generate_negative(xt, x0)
         
         if self.diff_obj.config['model']['self_condition']:
             model_kwargs['self_conditions'] = th.zeros(xt.shape[0], xt.shape[1], self.diff_obj.vocab_size, device=device)
@@ -493,7 +493,8 @@ class Seq2SeqMDLM(Seq2Seq):
                 model_kwargs['self_conditions'] = model_output.detach()
         
         # Get log(probabilities) from both models
-        logprobs_policy = self.decoder(xt, **model_kwargs)['out'].log_softmax(dim=-1)
+        logprobs_policy_ = self.decoder(xt, **model_kwargs)['out']
+        logprobs_policy = logprobs_policy_.log_softmax(dim=-1)
         with th.no_grad():
             logprobs_ref = self.refmodel(xt, **model_kwargs)['out'].log_softmax(dim=-1)
 
@@ -506,13 +507,37 @@ class Seq2SeqMDLM(Seq2Seq):
         lp_loss_ref = logprobs_ref.gather(-1, xl[...,None]).squeeze(-1)
 
         # DPO Contrastive Objective
-        pi_logratios = lp_win_policy - lp_loss_policy
-        ref_logratios = lp_win_ref - lp_loss_ref
-        logits = pi_logratios - ref_logratios
+        first_term = lp_win_policy - lp_loss_policy
+        second_term = lp_win_ref - lp_loss_ref
+        first_term_ = lp_win_policy - lp_win_ref
+        second_term_ = lp_loss_policy - lp_loss_ref
+        logits = 0.9*first_term_ - 0.1*second_term_
+        # KL Divergence
+        kl = (logprobs_policy.exp() * (logprobs_policy - logprobs_ref)).detach().sum(-1).mean().item()
         
-        weights = th.log1p(delta_mass.abs())
-        loss = -F.logsigmoid(beta * logits) # (win-loss) must be larger for lower beta to get same loss as larger beta
-        return (weights[:,None] * loss)[masked_mask]
+        weights = 0.1*delta_mass.abs() #th.log1p(delta_mass.abs())
+        masked_mask = (xt == self.decoder.MASK) & (x0!=xl)
+        masked_mask_ = (xt == self.decoder.MASK) & (x0==xl)
+        cross_entropy = F.cross_entropy(logprobs_policy.transpose(-1,-2), x0, reduction='none')[masked_mask_].mean()
+        loss_ = -F.logsigmoid(beta * logits) # (win-loss) must be larger for lower beta to get same loss as larger beta
+        loss_ = (weights[:,None] * loss_)[masked_mask].mean()
+        loss = loss_ + cross_entropy
+
+        wvl = first_term[masked_mask].detach().mean().item()
+        wvl_ref = second_term[masked_mask].detach().mean().item()
+        relative_win = first_term_[masked_mask].detach().mean().item()
+        relative_loss = second_term_[masked_mask].detach().mean().item()
+        
+        return {
+            'loss': loss,
+            'logsigmoid': loss_.item(),
+            'cross_entropy': cross_entropy.item(),
+            'win_vs_loss': wvl,
+            'win_vs_loss_ref': wvl_ref,
+            'relative_win': relative_win,
+            'relative_loss': relative_loss,
+            'kl': kl,
+        }
 
 class Seq2SeqD3PM(Seq2Seq):
     def __init__(

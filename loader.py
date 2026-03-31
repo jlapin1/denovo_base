@@ -196,6 +196,8 @@ class LoaderHF(LoaderObj):
             masses_path = train_dataset_path
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
         max_seq = pep_length[1] if pep_length is not None else None
+        assert os.path.exists(join(train_dataset_path, dpe)), "Train dataset path doesn't exist"
+        assert os.path.exists(join(val_dataset_path, dpe)), "Train dataset path doesn't exist"
         
         ##############
         # Dictionary #

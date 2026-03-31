@@ -1047,12 +1047,13 @@ class DenovoMDLMObj(BaseDenovo):
         self._model.train()
         self._model.zero_grad()
         _, target, loss_mask = self.inptarg(batch)
-        loss = self._model(batch, target, None, False, rl=True)
-        loss = loss.mean()
+        losses = self._model(batch, target, None, False, rl=True)
+        loss = losses['loss']
         self.accelerator.backward(loss)
         self.update_lr()
         self.opt.step()
-        return {'loss': loss.item()}
+        losses['loss'] = losses['loss'].item()
+        return losses
     
     def log_wandb(self, losses, grad_norm):
         loss = losses.pop('loss')
