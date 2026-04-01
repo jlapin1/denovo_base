@@ -28,7 +28,7 @@ prev_wts: /cmnfs/proj/diffusion/experiments/2026-03-06_22-58-14 # Load weights f
 load_last: True
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: True
+save_weights: False
 high_score: aa_recall
 save_last_freq: 10000
 eval_frequency: 600
@@ -210,7 +210,7 @@ decoder_mdlm:
       length: 41
       self_condition: True
     guidance:
-      p_uncond: 0.2
+      p_uncond: 0
       w: 2
 decoder_d3pm:
   steps: 100
