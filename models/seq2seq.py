@@ -483,7 +483,7 @@ class Seq2SeqMDLM(Seq2Seq):
         model_kwargs['timesteps'] = sigma if self.diff_obj.time_conditioning else th.zeros_like(sigma)
         move_chance = 1 - th.exp(-sigma[:, None])
         xt = self.diff_obj.q_xt(x0, move_chance)
-        xl, xt, delta_mass = self.generate_negative(xt, x0)
+        xl, xt, delta_mass = self.generate_negative(xt, x0, sub_rate=.2)
         
         if self.diff_obj.config['model']['self_condition']:
             model_kwargs['self_conditions'] = th.zeros(xt.shape[0], xt.shape[1], self.diff_obj.vocab_size, device=device)
@@ -511,11 +511,11 @@ class Seq2SeqMDLM(Seq2Seq):
         second_term = lp_win_ref - lp_loss_ref
         first_term_ = lp_win_policy - lp_win_ref
         second_term_ = lp_loss_policy - lp_loss_ref
-        logits = 0.9*first_term_ - 0.1*second_term_
+        logits = first_term - second_term
         # KL Divergence
         kl = (logprobs_policy.exp() * (logprobs_policy - logprobs_ref)).detach().sum(-1).mean().item()
         
-        weights = 0.1*delta_mass.abs() #th.log1p(delta_mass.abs())
+        weights = th.log1p(delta_mass.abs())
         masked_mask = (xt == self.decoder.MASK) & (x0!=xl)
         masked_mask_ = (xt == self.decoder.MASK) & (x0==xl)
         cross_entropy = F.cross_entropy(logprobs_policy.transpose(-1,-2), x0, reduction='none')[masked_mask_].mean()
