@@ -209,7 +209,7 @@ decoder_mdlm:
       length: 41
       self_condition: True
     guidance:
-      p_uncond: 0.2
+      p_uncond: 0
       w: 2
 decoder_d3pm:
   steps: 100
