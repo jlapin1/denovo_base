@@ -443,47 +443,56 @@ class Seq2SeqMDLM(Seq2Seq):
         return_ = {'prediction': top_sequences, 'logits': logits} | additional_outputs
         return return_
 
-    def generate_negative(self, xt, x0, sub_rate=0.2):
+    def generate_negative(self, xt, x0, model_kwargs, n=1):
+        bs, sl = xt.shape
+        _, sl2, kvs = model_kwargs['kv_features'].shape
+        if 'self_conditions' in model_kwargs:
+            _, _, cats = model_kwargs['self_conditions'].shape
+        
+        xt = xt[:,None].tile([1, n, 1]).reshape(n*bs, sl)
+        embedding = model_kwargs['kv_features'][:,None].tile([1, n, 1, 1]).reshape(n*bs, sl2, kvs)
+        batch = {
+            'mass': model_kwargs['mass'][:,None].tile([1, n]).reshape(n*bs),
+            'charge': model_kwargs['charge'][:,None].tile([1, n]).reshape(n*bs),
+            #'kv_features': model_kwargs['kv_features'][:,None].tile([1, n, 1, 1]).reshape(n*bs, sl2, kvs)
+            'self_conditions': model_kwargs['self_conditions'][:,None].tile([1, n, 1, 1]).reshape(n*bs, sl, cats),
+        }
+        with th.no_grad():
+            decout = self.decoder.predict_sequence(embedding, batch, x_init=xt, top=100,)
+            prediction = decout['prediction']
+
         original_masses = self.masses.to(x0.device)[None].tile([x0.shape[0], 1]).gather(-1, x0).sum(-1)
-        xl = x0.clone()
-
-        peptide_lengths = (x0!=self.decoder.NT).sum(1)-1
-        grid = th.arange(xl.shape[1]).to(xl.device)[None].tile([xl.shape[0], 1])
+        masses = self.masses.to(x0.device)[None].tile([prediction.shape[0], 1]).gather(-1, prediction).sum(-1)
+        deltas = (original_masses[:,None] - masses.reshape(bs, n)).abs()
+        losers = ((deltas!=0).float() + th.rand_like(deltas)).argmax(-1)
+        xl = prediction.reshape(bs, n, -1)[th.arange(bs), losers]
+        delta_masses = deltas[th.arange(bs), losers]
+        anys = (deltas!=0).any(1)
+        xl = th.where(anys[:,None], xl, x0)
         
-        # Find non-isobaric sequence
-        scores = ((xt == self.decoder.MASK)&(grid < peptide_lengths[:,None])).float() # preferred masked non-null tokens
-        scores *= th.rand_like(scores) # sample
-        fillinds = (peptide_lengths * th.rand_like(peptide_lengths.float())).floor().int()
-        sample = scores > (1-sub_rate) # sample
-        nada = sample.sum(1)==0
-        sample[nada, fillinds[nada]] = True
-        xt[nada, fillinds[nada]] = self.decoder.MASK
-        seqinds = th.where(sample)
-
-        tochange = xl[seqinds]
-        x = tochange.clone()
-        alive = x==tochange
-        while not (x!=tochange).all():
-            x[alive] = th.tensor(np.random.choice(self.rl_subs, (alive.sum().item(),)), device=xl.device)
-            alive = x==tochange
-        xl[seqinds] = x
+        # Second bests for same solutions
+        bsinds = th.where(~anys)[0]
+        peptide_lengths = th.where(x0==self.decoder.EOS)[1]
+        longenough = th.arange(sl, device=xt.device)[None].tile([bs, 1]) < peptide_lengths[:,None]
+        slinds = (((xt.reshape(bs,n,-1)[:,0]==self.decoder.MASK)&(longenough)).float() + th.rand(bs, sl,device=xt.device)).argmax(1)[~anys]
+        #xl[bsinds, slinds] = decout['logits'].reshape(bs, n, sl, -1)[bsinds, 0, slinds]
+        subs = decout['logits'].reshape(bs, n, sl, -1)[bsinds, 0, slinds].argsort(1)[:,-2]
+        xl[bsinds,slinds] = subs
+        delta_masses = (original_masses - self.masses.to(x0.device)[None].tile([xl.shape[0], 1]).gather(-1, xl).sum(-1)).abs()
         
-        new_masses  = self.masses.to(xl.device)[None].tile([xl.shape[0], 1]).gather(-1, xl).sum(-1)
-        delta_mass = new_masses - original_masses
-        
-        return xl, xt, delta_mass
+        return xl, delta_masses
 
     def contrastive_loss(self, x0, model_kwargs, *args, beta=0.1, **kwargs):
 
         # Set up all variables: xt, timesteps, self_conditions
         bs, sl = x0.shape
         device = x0.device
-        t = self.diff_obj._sample_t(bs, device)
+        t = self.diff_obj._sample_t(bs, device).clamp(0.2)
         sigma, dsigma = self.diff_obj.noise(t)
         model_kwargs['timesteps'] = sigma if self.diff_obj.time_conditioning else th.zeros_like(sigma)
         move_chance = 1 - th.exp(-sigma[:, None])
-        xt = self.diff_obj.q_xt(x0, move_chance)
-        xl, xt, delta_mass = self.generate_negative(xt, x0, sub_rate=.2)
+        xt = self.diff_obj.q_xt(x0, move_chance) # th.full_like(x0, self.decoder.MASK)
+        #xl, xt, delta_mass = self.generate_negative(xt, x0, sub_rate=.2)
         
         if self.diff_obj.config['model']['self_condition']:
             model_kwargs['self_conditions'] = th.zeros(xt.shape[0], xt.shape[1], self.diff_obj.vocab_size, device=device)
@@ -492,6 +501,7 @@ class Seq2SeqMDLM(Seq2Seq):
                     model_output = self.decoder(xt, **model_kwargs)['out']
                 model_kwargs['self_conditions'] = model_output.detach()
         
+        xl, delta_mass = self.generate_negative(xt, x0=x0, model_kwargs=model_kwargs, n=4)
         # Get log(probabilities) from both models
         logprobs_policy_ = self.decoder(xt, **model_kwargs)['out']
         logprobs_policy = logprobs_policy_.log_softmax(dim=-1)
@@ -513,7 +523,7 @@ class Seq2SeqMDLM(Seq2Seq):
         second_term_ = lp_loss_policy - lp_loss_ref
         logits = first_term - second_term
         # KL Divergence
-        kl = (logprobs_policy.exp() * (logprobs_policy - logprobs_ref)).detach().sum(-1).mean().item()
+        kl = (logprobs_policy.detach().exp() * (logprobs_policy.detach() - logprobs_ref)).sum(-1).mean().item()
         
         weights = th.log1p(delta_mass.abs())
         masked_mask = (xt == self.decoder.MASK) & (x0!=xl)
@@ -521,7 +531,7 @@ class Seq2SeqMDLM(Seq2Seq):
         cross_entropy = F.cross_entropy(logprobs_policy.transpose(-1,-2), x0, reduction='none')[masked_mask_].mean()
         loss_ = -F.logsigmoid(beta * logits) # (win-loss) must be larger for lower beta to get same loss as larger beta
         loss_ = (weights[:,None] * loss_)[masked_mask].mean()
-        loss = loss_ + cross_entropy
+        loss = loss_ + 0*cross_entropy
 
         wvl = first_term[masked_mask].detach().mean().item()
         wvl_ref = second_term[masked_mask].detach().mean().item()

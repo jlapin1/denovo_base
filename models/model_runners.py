@@ -442,6 +442,7 @@ class BaseDenovo:
                 'peptide_length': [],
                 'pred_intseq': [],
                 'probs': [],
+                'ppm': [],
                 'targ_aaseq': [],
                 'pred_aaseq': [],
                 'correct_aa': [],
@@ -456,7 +457,7 @@ class BaseDenovo:
             dataframe = None
 
         # losses
-        out = {'ce': 0}
+        out = {'ce': 0, 'ppm': 0}
         tots = {'sum':{}, 'total': {}}
 
         # Progress bar
@@ -496,9 +497,7 @@ class BaseDenovo:
             
             # Cross entropy
             pred = probs.transpose(-1,-2)
-            out['ce'] += (
-                F.cross_entropy(pred, target, reduction='none')[loss_mask].sum()
-            )
+            out['ce'] += F.cross_entropy(pred, target, reduction='none')[loss_mask].sum()
             
             # Deepnovo metrics
             prediction = self.fill_null_after_first_eos_token(prediction)
@@ -517,6 +516,11 @@ class BaseDenovo:
                     'peptide': len(aa_matches_batch),
                 },
             }
+
+            # PPM
+            pred_masses = self.model.decoder.scale.intseq2mz(prediction, batchdev['charge'])
+            ppms = U.deltaPPM(batchdev['mass'], pred_masses)
+            out['ppm'] += ppms.sum()
 
             # Add to totals
             for metric in dn_metrics['sum'].keys():
@@ -541,6 +545,7 @@ class BaseDenovo:
                 dataframe['targ_intseq'].extend(batch['intseq'].cpu().numpy().tolist())
                 dataframe['pred_intseq'].extend(prediction.cpu().numpy().tolist())
                 dataframe['probs'].extend(predicted_probs.cpu().numpy().tolist())
+                dataframe['ppm'].extend(ppms.cpu().numpy().tolist())
                 dataframe['targ_aaseq'].extend(targ_strings)
                 dataframe['pred_aaseq'].extend(pred_strings)
                 dataframe['correct_aa'].extend([result[0] for result in aa_matches_batch])
@@ -573,6 +578,7 @@ class BaseDenovo:
         steps = i+1
         totsz = self.config['batch_size']*steps
         out['ce'] = float((out['ce'] / (totsz * self.config['sl'])).cpu().detach().numpy())
+        out['ppm'] = out['ppm'].cpu().item() / totsz
         for metric in tots['sum'].keys():
             out[metric] = float(tots['sum'][metric] /  tots['total'][metric])
         

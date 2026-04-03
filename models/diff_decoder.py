@@ -581,12 +581,13 @@ class MDLMDecoder(base_diffusion_decoder):
 
         return {'out': out, 'sa_cache': cache}
     
-    def predict_sequence(self, embedding, batch, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
+    def predict_sequence(self, embedding, batch, x_init=None, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
         bs = embedding.shape[0]
         model_kwargs = {
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
+            'self_conditions': batch['self_conditions'] if 'self_conditions' in batch else None,
         }
         blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
         
@@ -597,7 +598,7 @@ class MDLMDecoder(base_diffusion_decoder):
             
             # Add to input
             if blocks == 1:
-                x = None
+                x = x_init
             else:
                 block_size = self.block_size if m<blocks-1 else out.shape[1]-m*self.block_size
                 x = self.add_block(x, block_size=block_size)

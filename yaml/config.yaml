@@ -13,7 +13,7 @@ lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
 lr_warmup_end: 1.e-5 # phase 2 LR
-lr_warmup_steps: 20000
+lr_warmup_steps: 500
 # Phase 2 - Flat
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
@@ -28,10 +28,10 @@ prev_wts: /cmnfs/proj/diffusion/experiments/2026-03-06_22-58-14 # Load weights f
 load_last: True
 new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
-eval_frequency: 600
+eval_frequency: 1800
 # Logging
 log_wandb: True
 wandb_entity: joellapin
