@@ -1,6 +1,6 @@
 eval_only: False
 inference: False
-rl: True
+rl: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
@@ -12,26 +12,26 @@ epochs: 100
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-6
-lr_warmup_end: 1.e-5 # phase 2 LR
-lr_warmup_steps: 500
+lr_warmup_end: 3.77e-5 # phase 2 LR
+lr_warmup_steps: 0
 # Phase 2 - Flat
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
-lr_floor: 1.0e-5
-lr_decay_steps: 1000000 # 1000000
+lr_floor: 5.0e-6
+lr_decay_steps: 1500000 # 1000000
 
 ############################
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2026-03-06_22-58-14 # Load weights from previous run (project path->timestamp)
+prev_wts: save/2026-04-03_16-08-34 # Load weights from previous run (project path->timestamp)
 load_last: True
-new_exp: True # continue using old directory (if pev_wts) or create new one
+new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
 save_weights: True
 high_score: aa_recall
 save_last_freq: 10000
-eval_frequency: 1800
+eval_frequency: 5400
 # Logging
 log_wandb: True
 wandb_entity: joellapin
@@ -53,7 +53,7 @@ loader:
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  num_workers: 8
+  num_workers: 4
   reverse: True
   val_steps: 100
   disperse: False
