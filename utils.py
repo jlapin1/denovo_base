@@ -277,6 +277,9 @@ masses = {
 	'V': 99.068413945,
 }
 
+masstomz = lambda mass, charge: (mass + 18.010565) / charge + 1.00727646688
+mztomass = lambda mz, charge: (mz - 1.00727646688) * charge - 18.010565
+
 class Scale:
     def __init__(self, amod_dict):
         self.amod_dict = amod_dict
@@ -307,7 +310,7 @@ class Scale:
     def intseq2mz(self, intseq, charge):
         total_mass = self.intseq2mass(intseq)
         mask = total_mass == 0
-        mz = (total_mass + 18.010565) / charge + 1.00727646688
+        mz = masstomz(total_mass, charge)
         mz[mask] = 0
         return mz
 
@@ -318,7 +321,7 @@ class Scale:
 
     def calc_mz(self, seq, charge, intseq=True):
         tomass = self.intseq2mass if intseq else self.modseq2mass
-        return (tomass(seq) + 18.010565) / charge + 1.00727646688
+        return masstomz(tomass(seq), charge)
 
 deltaPPM = lambda mprec, mpred: abs(mprec - mpred) * 1e6 / mprec
 

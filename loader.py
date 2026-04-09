@@ -455,3 +455,140 @@ class LoaderCls(LoaderObj):
 
         return intseq
 
+
+class LoaderRegr(LoaderObj):
+    def __init__(
+        self,
+        dataset_path: str,
+        dictionary_path: str=None,
+        tokenizer_path: str=None,
+        num_workers: int=8,
+        batch_size: int=100,
+        synonyms: list=None,
+        mean: float=0,
+        std: float=1,
+        **kwargs
+    ):
+        tokenizer_path = dataset_path if tokenizer_path==None else tokenizer_path
+
+        # Dictionary
+        if dictionary_path is not None:
+            self.amod_dic = self.create_sequence_dictionary(dictionary_path)
+            if synonyms is not None:
+                for pair in synonyms:
+                    letter_a, letter_b = pair
+                    self.amod_dic = self.synonym(letter_a, letter_b, self.amod_dic)
+            self.amod_dic_rev = self.reverse_dictionary(self.amod_dic)
+        self.scale = utils.Scale(self.amod_dic)
+
+        # Class mapping
+        #self.label_dict, self.label_dictr = self.create_label_dictionary(dataset_path, filename="classes.txt")
+        
+        # Tokenizer
+        self.tokenizer = self.create_tokenizer(tokenizer_path)
+        
+        # Load dataset
+        data_files = {
+            'train': join(dataset_path, "parquet/processed", "*train*parquet"),
+            'val': join(dataset_path, "parquet/processed", "*val*parquet"),
+        }
+        dataset = load_dataset(
+            'parquet',
+            data_files=data_files,
+            columns=['modified_sequence', 'peptide_length', 'precursor_mass', 'precursor_charge'],
+            streaming=True,
+        )
+        #dataset['train'] = dataset['train'].select(np.arange(0,100, 10))
+        #dataset['train'] = dataset['train'].shuffle()
+        self.dataset = dataset
+
+        self.find_shift_and_scale(1000000)
+
+        def map_fn_local(example, tokenizer, token_dic, max_seq, mean=0, std=1):
+            tokenized_sequence = tokenizer(example['modified_sequence'])
+            length = len(tokenized_sequence)
+            example['total_mass'] = utils.mztomass(example['precursor_mass'], example['precursor_charge'])
+            example['fixed_mass'] = (example['total_mass'] - mean) / std
+            #example['total_mass'] = self.scale.modseq2mass(example['modified_sequence'])
+            full_seq = np.array(tokenized_sequence + (max_seq-length) * ['X'], dtype='U20')
+            
+            intseq = [token_dic[a] for a in full_seq[:max_seq]]
+            
+            example['intseq'] = intseq
+
+            return example
+
+        # Map
+        lambda_function = lambda example: map_fn_local(
+            example,
+            tokenizer=self.tokenizer,
+            token_dic=self.amod_dic,
+            max_seq=kwargs['pep_length'][1],
+            mean=self.mean,
+            std=self.std,
+        )
+        #dataset = dataset.filter(
+        #    lambda example:
+        #    'U' not in example['sequence']
+        #)
+        dataset = dataset.map(
+            lambda_function, 
+            remove_columns=[],
+        )
+
+        # Filter for length
+        if 'pep_length' in kwargs.keys():
+            dataset = dataset.filter(
+                lambda example: 
+                (example['peptide_length'] >= kwargs['pep_length'][0]) &
+                (example['peptide_length'] <= kwargs['pep_length'][1])
+            )
+
+        #dataset = dataset.shuffle()
+        #dataset = dataset.flatten_indices()
+        #dataset = dataset['train'].train_test_split(test_size=0.1)
+        dataset['test'] = dataset['val']
+
+        self.dataset = dataset
+
+        def local_collate_fn(batch_list):
+            intseq = th.stack([th.tensor(m['intseq'], dtype=th.int32) for m in batch_list])
+            real_mass = th.cat([th.tensor([m['total_mass']], dtype=th.float32) for m in batch_list])
+            labels = th.cat([th.tensor([m['fixed_mass']], dtype=th.float32) for m in batch_list])
+
+            return {'intseq': intseq, 'real_mass': real_mass, 'labels': labels}
+
+        self.dataloader = {
+            'train': self.build_dataloader(dataset['train'], batch_size, 0, local_collate_fn),
+            'test': self.build_dataloader(dataset['test'], batch_size, 0, local_collate_fn),
+        }
+
+    def append_null_token(self, intseq):
+        bs, sl = intseq.shape
+        nulls = th.fill(th.empty(bs, dtype=th.int64), self.NT).to(intseq.device)
+        out = th.cat([intseq, nulls[:,None]], dim=-1)
+
+        return out
+
+    def replace_with_eos_token(self, intseq, lengths):
+        bs, sl = intseq.shape
+        eos_inds = [th.arange(bs, device=intseq.device), lengths]
+        intseq[eos_inds] = self.EOS
+
+        return intseq
+
+    def find_shift_and_scale(self, total_batches=100000):
+        SUM = 0
+        total_samples = 0
+        lst = []
+        iterator = iter(self.dataset['train'])
+        for n, row in enumerate(iterator):
+            print(f"\r{n+1}/{total_batches}", end="")
+            if n == total_batches:
+                break
+            total_mass = utils.mztomass(row['precursor_mass'], row['precursor_charge'])
+            lst.append(total_mass)
+            total_samples += 1
+        self.mean = np.mean(lst).item()
+        self.std = np.std(lst).item()
+
