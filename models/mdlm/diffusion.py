@@ -599,20 +599,50 @@ class Diffusion:
     return self.mask_index * torch.ones(
       * batch_dims, dtype=torch.int64)
 
-  def _ddpm_caching_update(self, x, t, dt, p_x0=None, top=1, model_kwargs={}):
+  def _ddpm_caching_update(
+    self,
+    x,
+    t,
+    dt,
+    p_x0=None,
+    top=1,
+    model_kwargs={},
+    guide_model=None,
+  ):
+    # Timesteps
     assert self.config['noise']['type'] == 'loglinear'
     sigma_t, _ = self.noise(t)
     if t.ndim > 1:
       t = t.squeeze(-1)
     assert t.ndim == 1
+    # Move chance
     move_chance_t = t[:, None, None]
     move_chance_s = (t - dt)[:, None, None]
     assert move_chance_t.ndim == 3, move_chance_t.shape
+    # Model
     if p_x0 is None:
       logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
+      # Compute unguided posterior
+      diffusion_log_probs = logp_x0 + torch.log(1. - move_chance_s / move_chance_t)
+      diffusion_log_probs[..., self.mask_index] = torch.log(move_chance_s / move_chance_t)[:, :, 0]
+      diffusion_log_probs.detach()
       p_x0 = logp_x0.exp()
+      if guide_model is not None:
+          with torch.enable_grad():
+            guide_out = guide_model(xt, sigma_t)
+            classifier_log_prob_xt = get_log_probs(guide_out)
+            classifiger_log_prob_xt.sum().backward()
+            grad_log_prob_xt = xt_one_hot.grad
+          classifier_log_prob_ratio = (grad_log_prob_xt - (xt_one_hot * grad_log_prob_xt).sum(dim=-1, keepdim=True)).detach().requires_grad_(False)
     
+          # Apply guidance
+          with torch.no_grad():
+            guided_log_probs = (gamma * classifier_log_prob) + diffusion_log_probs
+            #https://github.com/kuleshov-group/discrete-diffusion-guidance/blob/main/diffusion.py Line 1440
+
+      
     assert move_chance_t.ndim == p_x0.ndim
+    # Sampling
     q_xs = p_x0 * (move_chance_t - move_chance_s) * (p_x0 > self.config['sampling']['min_prob']).float()
     q_xs[p_x0 > self.config['sampling']['max_prob']] = 1e10
     q_xs[:, :, self.mask_index] = move_chance_s[:, :, 0]
@@ -680,7 +710,8 @@ class Diffusion:
       num_steps=None, 
       eps=1e-5,
       top=None,
-      model_kwargs={}, 
+      model_kwargs={},
+      guide_model=None,
       save_x=False, 
       save_p=False, 
       progress=False
@@ -736,7 +767,13 @@ class Diffusion:
               x = self._ddpm_update(x, t, dt, model_kwargs, top=top)
           elif self.sampler == 'ddpm_cache':
               p_x0_cache, x_next, logits = self._ddpm_caching_update(
-                  x, t, dt, p_x0=p_x0_cache, top=top, model_kwargs=model_kwargs
+                  x,
+                  t,
+                  dt,
+                  p_x0=p_x0_cache,
+                  top=top,
+                  model_kwargs=model_kwargs,
+                  guide_model=guide_model,
               )
           
           Logits[x_next!=x] = logits[x_next!=x]
