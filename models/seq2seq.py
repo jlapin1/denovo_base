@@ -377,7 +377,7 @@ class Seq2SeqMDLM(Seq2Seq):
         dictionary = self.encoder_embedding(batch)
         embedding = dictionary['emb']
         spectrum_mask = dictionary['mask']
-        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress, **kwargs)
         return decout
 
     def forward(self, batch, target, training_mask=None, block_decoding=False, rl=False):
@@ -397,14 +397,16 @@ class Seq2SeqMDLM(Seq2Seq):
 
     def predict_sequence(
         self, 
-        batch: dict,             # batch of inputs
-        save_x: bool=False,      # return the intseqs at every step
-        save_p: bool=False,      # return the logits at every step
-        num_steps: int=None,     # number of sampling steps in decoder
-        top: int=None,           # top categorical sampling; None defaults to config.yaml setting
-        n: int=None,             # return n sequences per batch member; None defaults to config.yaml setting
-        return_full: dict=False, # return n outputs for each batch member (instead of 1/top sequence)
-        progress: bool=False,    # tqdm progress bar
+        batch: dict,                # batch of inputs
+        save_x: bool=False,         # return the intseqs at every step
+        save_p: bool=False,         # return the logits at every step
+        num_steps: int=None,        # number of sampling steps in decoder
+        top: int=None,              # top categorical sampling; None defaults to config.yaml setting
+        n: int=None,                # return n sequences per batch member; None defaults to config.yaml setting
+        return_full: dict=False,    # return n outputs for each batch member (instead of 1/top sequence)
+        progress: bool=False,       # tqdm progress bar
+        guide_model: nn.Module=None,# guidance_model
+        gamma: int=1.,              # scaler for guidance
     ):
         # Input batch
         batch_size, SL = batch['mz'].shape
@@ -412,7 +414,16 @@ class Seq2SeqMDLM(Seq2Seq):
         batch = expand_batch(batch, n=n)
         
         # Model outputs
-        diffout = self.forward_eval(batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress)
+        diffout = self.forward_eval(
+            batch,
+            top=top,
+            save_x=save_x,
+            save_p=save_p,
+            num_steps=num_steps,
+            progress=progress,
+            guide_model=guide_model,
+            gamma=gamma,
+        )
         seqs = diffout.pop('prediction')
         logits = diffout.pop('logits')
         

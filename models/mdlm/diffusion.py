@@ -124,108 +124,12 @@ class Diffusion:
   def _validate_configuration(self):
     assert not (self.change_of_variables
                 and self.importance_sampling)
-    if self.parameterization == 'sedd':
-      assert not self.importance_sampling
-      assert not self.change_of_variables
-    if self.parameterization == 'd3pm':
-      assert self.T > 0
+    #if self.diffusion != 'absorbing_state':
+    #  assert self.parameterization not in {'ar', 'subs'}
     if self.T > 0:
       assert self.parameterization in {'d3pm', 'subs'}
     if self.subs_masking:
       assert self.parameterization == 'd3pm'
-
-  def on_load_checkpoint(self, checkpoint):
-    if self.ema:
-      self.ema.load_state_dict(checkpoint['ema'])
-    # Copied from:
-    # https://github.com/Dao-AILab/flash-attention/blob/main/training/src/datamodules/language_modeling_hf.py#L41
-    self.fast_forward_epochs = checkpoint['loops'][
-      'fit_loop']['epoch_progress']['current']['completed']
-    self.fast_forward_batches = checkpoint['loops'][
-      'fit_loop']['epoch_loop.batch_progress'][
-        'current']['completed']
-
-  def on_save_checkpoint(self, checkpoint):
-    if self.ema:
-      checkpoint['ema'] = self.ema.state_dict()
-    # Copied from:
-    # https://github.com/Dao-AILab/flash-attention/blob/main/training/src/tasks/seq.py
-    # ['epoch_loop.batch_progress']['total']['completed'] is 1 iteration
-    # behind, so we're using the optimizer's progress.
-    checkpoint['loops']['fit_loop'][
-      'epoch_loop.batch_progress']['total'][
-        'completed'] = checkpoint['loops']['fit_loop'][
-          'epoch_loop.automatic_optimization.optim_progress'][
-            'optimizer']['step']['total'][
-              'completed'] * self.trainer.accumulate_grad_batches
-    checkpoint['loops']['fit_loop'][
-      'epoch_loop.batch_progress']['current'][
-        'completed'] = checkpoint['loops']['fit_loop'][
-          'epoch_loop.automatic_optimization.optim_progress'][
-            'optimizer']['step']['current'][
-              'completed'] * self.trainer.accumulate_grad_batches
-    # _batches_that_stepped tracks the number of global steps, not the number
-    # of local steps, so we don't multiply with self.trainer.accumulate_grad_batches here.
-    checkpoint['loops']['fit_loop'][
-      'epoch_loop.state_dict'][
-        '_batches_that_stepped'] = checkpoint['loops']['fit_loop'][
-          'epoch_loop.automatic_optimization.optim_progress'][
-            'optimizer']['step']['total']['completed']
-    if 'sampler' not in checkpoint.keys():
-      checkpoint['sampler'] = {}
-    if hasattr(self.trainer.train_dataloader.sampler,
-               'state_dict'):
-      sampler_state_dict = self.trainer.\
-        train_dataloader.sampler.state_dict()
-      checkpoint['sampler'][
-        'random_state'] = sampler_state_dict.get(
-          'random_state', None)
-    else:
-      checkpoint['sampler']['random_state'] = None
-
-  def on_train_start(self):
-    if self.ema:
-      self.ema.move_shadow_params_to_device(self.device)
-    # Adapted from:
-    # https://github.com/Dao-AILab/flash-attention/blob/main/training/src/datamodules/language_modeling_hf.py
-    distributed = (
-      self.trainer._accelerator_connector.use_distributed_sampler
-      and self.trainer._accelerator_connector.is_distributed)
-    if distributed:
-      sampler_cls = dataloader.FaultTolerantDistributedSampler
-    else:
-      sampler_cls = dataloader.RandomFaultTolerantSampler
-    updated_dls = []
-    for dl in self.trainer.fit_loop._combined_loader.flattened:
-      if hasattr(dl.sampler, 'shuffle'):
-        dl_sampler = sampler_cls(
-          dl.dataset, shuffle=dl.sampler.shuffle)
-      else:
-        dl_sampler = sampler_cls(dl.dataset)
-      if (distributed
-          and self.fast_forward_epochs is not None
-          and self.fast_forward_batches is not None):
-        dl_sampler.load_state_dict({
-          'epoch': self.fast_forward_epochs,
-          'counter': (self.fast_forward_batches
-                      * self.config.loader.batch_size)})
-      updated_dls.append(
-        torch.utils.data.DataLoader(
-          dl.dataset,
-          batch_size=self.config.loader.batch_size,
-          num_workers=self.config.loader.num_workers,
-          pin_memory=self.config.loader.pin_memory,
-          sampler=dl_sampler,
-          shuffle=False,
-          persistent_workers=True))
-    self.trainer.fit_loop._combined_loader.flattened = updated_dls
-
-  def optimizer_step(self, *args, **kwargs):
-    super().optimizer_step(*args, **kwargs)
-    if self.ema:
-      self.ema.update(itertools.chain(
-        self.backbone.parameters(),
-        self.noise.parameters()))
 
   def _subs_parameterization(self, logits, xt):
     # log prob at the mask index = - infinity
@@ -405,183 +309,7 @@ class Diffusion:
              on_epoch=False,
              sync_dist=True)
     return loss
-
-  def on_validation_epoch_start(self):
-    if self.ema:
-      self.ema.store(itertools.chain(
-        self.backbone.parameters(),
-        self.noise.parameters()))
-      self.ema.copy_to(itertools.chain(
-        self.backbone.parameters(),
-        self.noise.parameters()))
-    self.backbone.eval()
-    self.noise.eval()
-    assert self.valid_metrics.nll.mean_value == 0
-    assert self.valid_metrics.nll.weight == 0
-
-  def validation_step(self, batch, batch_idx):
-    return self._compute_loss(batch, prefix='val')
-
-  def on_validation_epoch_end(self):
-    if ((self.config.eval.compute_perplexity_on_sanity
-         or not self.trainer.sanity_checking)
-         and self.config.eval.generate_samples
-         and not self.parameterization == 'ar'):
-      # TODO(justin): implement sampling and kv cache for AR
-      samples, text_samples = None, None
-      for _ in range(
-        self.config.sampling.num_sample_batches):
-        samples = self._sample()
-        # Decode the samples to be re-tokenized by eval model
-        text_samples = self.tokenizer.batch_decode(samples)
-        if self.config.eval.compute_generative_perplexity:
-          self.compute_generative_perplexity(text_samples)
-      if self.trainer.global_rank == 0 and hasattr(
-        self.trainer.logger, 'log_table'):
-        # Log the last generated samples
-        text_samples = text_samples[
-          : self.config.sampling.num_sample_log]
-        self.trainer.logger.log_table(
-          key=f'samples@global_step{self.global_step}',
-          columns=['Generated Samples'],
-          data=[[s] for s in text_samples])
-      if self.config.eval.compute_generative_perplexity:
-        self.log('val/gen_ppl',
-                 self.gen_ppl_metric,
-                 on_epoch=True,
-                 on_step=False,
-                 sync_dist=True)
-    if self.ema:
-      self.ema.restore(
-        itertools.chain(self.backbone.parameters(),
-                        self.noise.parameters()))
-
-  def configure_optimizers(self):
-    # TODO(yair): Lightning currently giving this warning when using `fp16`:
-    #  "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
-    #  Not clear if this is a problem or not.
-    #  See: https://github.com/Lightning-AI/pytorch-lightning/issues/5558
-    optimizer = torch.optim.AdamW(
-      itertools.chain(self.backbone.parameters(),
-                      self.noise.parameters()),
-      lr=self.config.optim.lr,
-      betas=(self.config.optim.beta1,
-             self.config.optim.beta2),
-      eps=self.config.optim.eps,
-      weight_decay=self.config.optim.weight_decay)
-
-    scheduler = hydra.utils.instantiate(
-      self.config.lr_scheduler, optimizer=optimizer)
-    scheduler_dict = {
-      'scheduler': scheduler,
-      'interval': 'step',
-      'monitor': 'val/loss',
-      'name': 'trainer/lr',
-    }
-    return [optimizer], [scheduler_dict]
-
-  @torch.no_grad()
-  def eval_retokenize(self, text_samples, max_length):
-    """Retokenizes samples for the eval model.
-    
-    Args:
-        text_samples: List of sentences generated by the model.
-    Returns:
-        samples: Samples re-tokenized for the eval model
-        attn_mask: Attention mask for the eval model
-        eval_context_size: Size of the context for the eval model
-    """
-    if 'llama2' in self.gen_ppl_eval_model_name_or_path:
-      tokenizer_kwargs = {
-        'text_samples': text_samples,
-        'return_tensors': 'pt',
-        'return_token_type_ids': False,
-        'return_attention_mask': True,
-        'truncation': True,
-        'padding': True,
-        'max_length': max_length,
-      }
-      eval_context_size = 4096
-    else:
-      tokenizer_kwargs = {
-        'return_tensors': 'pt',
-        'return_token_type_ids': False,
-        'return_attention_mask': True,
-        'truncation': True,
-        'padding': True,
-        'max_length': max_length,
-      }
-      eval_context_size = 1024
-    samples = self.eval_model_tokenizer(
-      text_samples, ** tokenizer_kwargs)
-    attn_mask = samples['attention_mask']
-    samples = samples['input_ids']
-    if 'llama2' not in self.gen_ppl_eval_model_name_or_path:
-      attn_mask = attn_mask.to(self.device)
-      samples = samples.to(self.device)      
-    return samples, attn_mask, eval_context_size
-
-  @torch.no_grad()
-  def compute_generative_perplexity(
-    self,
-    text_samples: typing.List[str],
-    retokenize: bool = True,
-    max_length: typing.Optional[int] = None) -> None:
-    """Compute the generative perplexity of the model.
-
-    Args:
-        text_samples: List of sentences generated by the model.
-    
-    Returns:
-        Perplexity of the generated text under a different
-        pre-trained AR model (e.g., GPT2).
-    """
-    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-    eval_model = transformers.AutoModelForCausalLM.from_pretrained(
-      self.gen_ppl_eval_model_name_or_path).eval()
-    if max_length is None:
-      max_length = self.config.model.length
-    if 'llama2' not in self.gen_ppl_eval_model_name_or_path:
-      eval_model = eval_model.to(self.device)
-    # Re-tokenize using eval model's tokenizer
-    if retokenize:
-      (samples, attn_mask,
-       eval_context_size) = self.eval_retokenize(
-         text_samples, max_length=max_length)
-    else:
-      samples = text_samples
-      attn_mask = torch.ones(samples.shape).to(self.device)
-      eval_context_size = samples.shape[-1]
-    batch_size = min(
-      self.config.eval.perplexity_batch_size,
-      samples.shape[0])
-    num_batches = samples.shape[0] // batch_size
-    for i in range(num_batches):
-      _samples = torch.split(
-        samples[i * batch_size: (i + 1) * batch_size],
-        eval_context_size,
-        dim=-1)
-      _attn_mask = torch.split(
-        attn_mask[i * batch_size: (i + 1) * batch_size],
-        eval_context_size,
-        dim=-1)
-      for (sample_chunk, attn_mask_chunk) in zip(
-        _samples, _attn_mask):
-        logits = eval_model(
-          sample_chunk, attention_mask=attn_mask_chunk)[0]
-        logits = logits.transpose(-1, -2)
-        
-        nlls = F.cross_entropy(logits[..., :-1],
-                               sample_chunk[..., 1:],
-                               reduction='none')
-        first_eos = (sample_chunk == self.eval_model_tokenizer\
-                     .eos_token_id).cumsum(-1) == 1
-        token_mask = (
-          sample_chunk
-          != self.eval_model_tokenizer.eos_token_id)
-        self.gen_ppl_metric.update(
-          nlls, first_eos[..., 1:] + token_mask[..., 1:])
-
+  
   def q_xt(self, x, move_chance):
     """Computes the noisy sample xt.
 
@@ -608,6 +336,7 @@ class Diffusion:
     top=1,
     model_kwargs={},
     guide_model=None,
+    gamma=1.,
   ):
     # Timesteps
     assert self.config['noise']['type'] == 'loglinear'
@@ -622,30 +351,38 @@ class Diffusion:
     # Model
     if p_x0 is None:
       logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
-      # Compute unguided posterior
-      diffusion_log_probs = logp_x0 + torch.log(1. - move_chance_s / move_chance_t)
-      diffusion_log_probs[..., self.mask_index] = torch.log(move_chance_s / move_chance_t)[:, :, 0]
-      diffusion_log_probs.detach()
       p_x0 = logp_x0.exp()
       if guide_model is not None:
-          with torch.enable_grad():
-            guide_out = guide_model(xt, sigma_t)
-            classifier_log_prob_xt = get_log_probs(guide_out)
-            classifiger_log_prob_xt.sum().backward()
-            grad_log_prob_xt = xt_one_hot.grad
-          classifier_log_prob_ratio = (grad_log_prob_xt - (xt_one_hot * grad_log_prob_xt).sum(dim=-1, keepdim=True)).detach().requires_grad_(False)
-    
-          # Apply guidance
-          with torch.no_grad():
-            guided_log_probs = (gamma * classifier_log_prob) + diffusion_log_probs
-            #https://github.com/kuleshov-group/discrete-diffusion-guidance/blob/main/diffusion.py Line 1440
-
-      
-    assert move_chance_t.ndim == p_x0.ndim
-    # Sampling
-    q_xs = p_x0 * (move_chance_t - move_chance_s) * (p_x0 > self.config['sampling']['min_prob']).float()
-    q_xs[p_x0 > self.config['sampling']['max_prob']] = 1e10
-    q_xs[:, :, self.mask_index] = move_chance_s[:, :, 0]
+          # Compute unguided posterior
+          diffusion_log_probs = logp_x0 + torch.log(1. - move_chance_s / move_chance_t) # + torch.log(move_chance_t)
+          diffusion_log_probs[..., self.mask_index] = torch.log(move_chance_s / move_chance_t)[:, :, 0] # + torch.log(move_chance_t)
+          diffusion_log_probs.detach()
+          # Compute guided posterior
+          if True: # approx
+              with torch.enable_grad():
+                guide_out = guide_model(x, t=sigma_t)
+                xt_one_hot = guide_out['one_hot']
+                guide_loss = guide_model.get_backprop_prop(guide_out['out'], model_kwargs['mass'], model_kwargs['charge'])
+                #classifiger_log_prob_xt.sum().backward()
+                guide_loss.backward(torch.ones_like(guide_loss))
+                guide_log_prob_xt = xt_one_hot.grad
+              # 2*all_grads - current_token_grads
+              guide_log_prob_ratio = (guide_log_prob_xt - (xt_one_hot * guide_log_prob_xt).sum(dim=-1, keepdim=True)).detach().requires_grad_(False)
+              guide_log_prob = (guide_log_prob_ratio + guide_log_prob_xt).detach().requires_grad_(False)
+        
+              # Apply guidance
+              with torch.no_grad():
+                guided_log_probs = (gamma * guide_log_prob) + diffusion_log_probs
+                copy_flag = x != self.mask_index
+                guided_log_probs[copy_flag] = self.neg_infinity
+                guided_log_probs[copy_flag, x[copy_flag]] = 0.0     
+              q_xs = guided_log_probs.softmax(dim=-1)
+      else:
+          #assert move_chance_t.ndim == p_x0.ndim
+          # Sampling
+          q_xs = p_x0 * (move_chance_t - move_chance_s) * (p_x0 > self.config['sampling']['min_prob']).float()
+          q_xs[p_x0 > self.config['sampling']['max_prob']] = 1e10
+          q_xs[:, :, self.mask_index] = move_chance_s[:, :, 0]
     sampler = _sample_top_categorical #if self.config['sampling']['top'] else _sample_categorical
     _x = sampler(q_xs, np.maximum(2, top))
     
@@ -712,6 +449,7 @@ class Diffusion:
       top=None,
       model_kwargs={},
       guide_model=None,
+      gamma=1.,
       save_x=False, 
       save_p=False, 
       progress=False
@@ -774,6 +512,7 @@ class Diffusion:
                   top=top,
                   model_kwargs=model_kwargs,
                   guide_model=guide_model,
+                  gamma=gamma,
               )
           
           Logits[x_next!=x] = logits[x_next!=x]
@@ -1227,29 +966,3 @@ class Diffusion:
     return (sampling_steps, intermediate_text_samples,
             sequence_lengths)
 
-  def restore_model_and_semi_ar_sample(
-      self, stride_length, num_strides, dt=0.001):
-    """Generate samples from the model."""
-    # Lightning auto-casting is not working in this method for some reason
-    if self.ema:
-      self.ema.store(itertools.chain(
-        self.backbone.parameters(),
-        self.noise.parameters()))
-      self.ema.copy_to(itertools.chain(
-        self.backbone.parameters(),
-        self.noise.parameters()))
-    self.backbone.eval()
-    self.noise.eval()
-    (sampling_steps, samples,
-     sequence_lengths) = self.sample_subs_guidance(
-      n_samples=self.config.loader.eval_batch_size,
-      stride_length=stride_length,
-      num_strides=num_strides, 
-      dt=dt)
-    if self.ema:
-      self.ema.restore(itertools.chain(
-        self.backbone.parameters(),
-        self.noise.parameters()))
-    self.backbone.train()
-    self.noise.train()
-    return sampling_steps, samples, sequence_lengths

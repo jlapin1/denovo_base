@@ -28,6 +28,7 @@ def replace_previous_settings(prev_config, update_config):
             update_config[key]['dictionary_path'] = prev_config[key]['dictionary_path']
             update_config[key]['reverse'] = prev_config[key]['reverse']
         prev_config[key] = update_config[key]
+    prev_config['decoder_mdlm']['cbg'] = update_config['decoder_mdlm']['cbg']
     
     return prev_config
 

@@ -7,6 +7,7 @@ from models.seq2seq import Seq2SeqMDLM
 import os
 from glob import glob
 import yaml
+import utils
 
 device = th.device("cuda" if th.cuda.is_available() else 'cpu')
 
@@ -211,14 +212,19 @@ class Regressor4MDLM(nn.Module):
         timestep_dimension=128,
         null_token=22,
         eos_token=23,
+        data_mean = 0.,
+        data_std = 1.,
     ):
         super(Regressor4MDLM, self).__init__()
         self.timestep_dimension = timestep_dimension
         self.NT = null_token
         self.EOS = eos_token
-        self.dir = diff_dir
+        #self.dir = diff_dir
         self.num_input_tokens = len(amod_dict) + 1
         self.running_units = running_units
+        
+        self.data_mean = nn.Parameter(th.tensor(data_mean), requires_grad=False)
+        self.data_std = nn.Parameter(th.tensor(data_std), requires_grad=False)
         
         """Diffusion model and object"""
         self.configure_diffusion(diff_dir, amod_dict) 
@@ -310,24 +316,34 @@ class Regressor4MDLM(nn.Module):
             print(f"Found no weights fitting regular expression")
 
     def configure_diffusion(self, svdir, amod_dic):
-        yaml_file = os.path.join(svdir, "yaml", "config.yaml")
-        with open(yaml_file) as f:
-            config = yaml.safe_load(f)
-        diff_config = config['decoder_mdlm']['diffusion_config']
-        model = Seq2SeqMDLM(
-            encoder_config = config['encoder_dict'],
-            decoder_config = config['decoder_diff']['model_config'],
-            diff_config = diff_config,
-            top_peaks = config['top_peaks'], 
-            max_peptide_length = config['pep_length'][1], 
-            token_dict = amod_dic,
-            ensemble_config   = config['decoder_diff']['ensemble'],
-            masses_path = config['loader']['masses_path'],
-        )
+        if type(svdir)==str:
+            yaml_file = os.path.join(svdir, "yaml", "config.yaml")
+            with open(yaml_file) as f:
+                config = yaml.safe_load(f)
+            diff_config = config['decoder_mdlm']['diffusion_config']
+            model = Seq2SeqMDLM(
+                encoder_config = config['encoder_dict'],
+                decoder_config = config['decoder_diff']['model_config'],
+                diff_config = diff_config,
+                top_peaks = config['top_peaks'], 
+                max_peptide_length = config['pep_length'][1], 
+                token_dict = amod_dic,
+                ensemble_config   = config['decoder_diff']['ensemble'],
+                masses_path = config['loader']['masses_path'],
+            )
+        else:
+            model = svdir
         self.diff_obj = model.diff_obj
         #self.load_saved_weights(svdir, model, 'model', False, False)
         self.predcats = model.decoder.predcats
     
+    def get_backprop_prop(self, pred, precursor_mz, precursor_charge):
+        pred_mass = pred * self.data_std + self.data_mean
+        target_mass = utils.mztomass(precursor_mz, precursor_charge)
+        target = (target_mass-self.data_mean) / self.data_std
+        loss = (pred - target).square()
+        return loss
+
     def sample_xt_from_x0(self, x0):
         bs, sl = x0.shape
         t = self.diff_obj._sample_t(bs, x0.device)

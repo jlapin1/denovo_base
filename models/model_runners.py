@@ -433,7 +433,7 @@ class BaseDenovo:
         # Dataframe
         def initial_dataframe(extra_keys: list=[]):
             dataframe = {
-                'name': [],
+                #'name': [],
                 #'chimeric': [],
                 #'hyperscore': [],
                 'targ_intseq': [],
@@ -532,7 +532,7 @@ class BaseDenovo:
             
             if save_df or stream_write:
                 self.on_eval_step_end(batchdev, out_dict, dataframe)
-                dataframe['name'].extend(batch['experiment_name'])
+                #dataframe['name'].extend(batch['experiment_name'])
                 if 'chimeric' in batch:
                     if 'chimeric' not in dataframe: dataframe['chimeric'] = []
                     dataframe['chimeric'].extend(batch['chimeric'].cpu().numpy().tolist())
@@ -552,7 +552,7 @@ class BaseDenovo:
                 dataframe['correct_peptide'].extend([result[1] for result in aa_matches_batch])
                 
                 # Prevent error at the end of evaluation when not streaming
-                length_first = len(dataframe['name'])
+                length_first = len(dataframe['charge'])
                 array = np.array([len(value) for key, value in dataframe.items()])
                 assert (length_first == array).all(), f"batch#: {i}, {dataframe.keys()}, {array}"
 				
@@ -969,6 +969,22 @@ class DenovoMDLMObj(BaseDenovo):
 
         #self.model.to(device)
         self.accelerate()
+
+        if self.config['decoder_mdlm']['cbg']['model_wts'] is not None:
+            from models.diff_classifier import Regressor4MDLM
+            self.guide_model = Regressor4MDLM(
+                self.model,
+                self.data.amod_dic,
+                null_token = self.data.amod_dic['X'],
+            )
+            weights_path = glob(os.path.join(self.config['decoder_mdlm']['cbg']['model_wts'], "weights", "*.wts"))
+            load = th.load(weights_path[0], map_location=device, weights_only=False)
+            self.guide_model.load_state_dict(load)
+            self.guide_model.eval()
+            self.guide_model.to(device)
+            self.eval_kwargs['guide_model'] = self.guide_model
+            self.eval_kwargs['gamma'] = self.config['decoder_mdlm']['cbg']['gamma']
+            print(f"<MRCOMMENT> Using guided diffusion with gamma={self.eval_kwargs['gamma']}")
 
         if self.accelerator.is_local_main_process:
             print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")

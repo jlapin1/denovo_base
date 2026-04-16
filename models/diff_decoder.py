@@ -581,7 +581,7 @@ class MDLMDecoder(base_diffusion_decoder):
 
         return {'out': out, 'sa_cache': cache}
     
-    def predict_sequence(self, embedding, batch, x_init=None, save_x=False, save_p=False, top=None, num_steps=None, progress=False):
+    def predict_sequence(self, embedding, batch, x_init=None, save_x=False, save_p=False, top=None, num_steps=None, progress=False, **kwargs):
         bs = embedding.shape[0]
         model_kwargs = {
             'kv_features': embedding,
@@ -612,7 +612,8 @@ class MDLMDecoder(base_diffusion_decoder):
                 top=top,
                 num_steps=num_steps,
                 progress=progress,
-                model_kwargs=model_kwargs
+                model_kwargs=model_kwargs,
+                **kwargs
             )
             
             # Add to output
