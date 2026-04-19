@@ -337,9 +337,9 @@ class Regressor4MDLM(nn.Module):
         #self.load_saved_weights(svdir, model, 'model', False, False)
         self.predcats = model.decoder.predcats
     
-    def get_backprop_prop(self, pred, precursor_mz, precursor_charge):
+    def get_backprop_prop(self, pred, **kwargs):
         pred_mass = pred * self.data_std + self.data_mean
-        target_mass = utils.mztomass(precursor_mz, precursor_charge)
+        target_mass = utils.mztomass(kwargs['mass'], kwargs['charge'])
         target = (target_mass-self.data_mean) / self.data_std
         loss = (pred - target).square()
         return loss

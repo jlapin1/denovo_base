@@ -326,6 +326,33 @@ class Diffusion:
   def _sample_prior(self, *batch_dims):
     return self.mask_index * torch.ones(
       * batch_dims, dtype=torch.int64)
+  
+  def apply_cbg(self, logp_x0, move_chance_s, move_chance_t, guide_model, x, sigma_t, model_kwargs, gamma):
+      # Compute unguided posterior
+      diffusion_log_probs = logp_x0 + torch.log(1. - move_chance_s / move_chance_t) # + torch.log(move_chance_t)
+      diffusion_log_probs[..., self.mask_index] = torch.log(move_chance_s / move_chance_t)[:, :, 0] # + torch.log(move_chance_t)
+      diffusion_log_probs.detach()
+      # Compute guided posterior
+      if True: # approx
+          with torch.enable_grad():
+            guide_out = guide_model(x, t=sigma_t)
+            xt_one_hot = guide_out['one_hot']
+            guide_loss = guide_model.get_backprop_prop(guide_out['out'], **model_kwargs)
+            #classifiger_log_prob_xt.sum().backward()
+            guide_loss.backward(torch.ones_like(guide_loss))
+            guide_log_prob_xt = xt_one_hot.grad
+          # 2*all_grads - current_token_grads
+          guide_log_prob_ratio = (guide_log_prob_xt - (xt_one_hot * guide_log_prob_xt).sum(dim=-1, keepdim=True)).detach().requires_grad_(False)
+          guide_log_prob = (guide_log_prob_ratio + guide_log_prob_xt).detach().requires_grad_(False)
+          
+          # Apply guidance
+          with torch.no_grad():
+            guided_log_probs = (gamma * guide_log_prob) + diffusion_log_probs
+            copy_flag = x != self.mask_index
+            guided_log_probs[copy_flag] = self.neg_infinity
+            guided_log_probs[copy_flag, x[copy_flag]] = 0.0     
+          q_xs = guided_log_probs.softmax(dim=-1)
+      return q_xs
 
   def _ddpm_caching_update(
     self,
@@ -353,32 +380,9 @@ class Diffusion:
       logp_x0, logits = self.forward(x, sigma_t, model_kwargs)
       p_x0 = logp_x0.exp()
       if guide_model is not None:
-          # Compute unguided posterior
-          diffusion_log_probs = logp_x0 + torch.log(1. - move_chance_s / move_chance_t) # + torch.log(move_chance_t)
-          diffusion_log_probs[..., self.mask_index] = torch.log(move_chance_s / move_chance_t)[:, :, 0] # + torch.log(move_chance_t)
-          diffusion_log_probs.detach()
-          # Compute guided posterior
-          if True: # approx
-              with torch.enable_grad():
-                guide_out = guide_model(x, t=sigma_t)
-                xt_one_hot = guide_out['one_hot']
-                guide_loss = guide_model.get_backprop_prop(guide_out['out'], model_kwargs['mass'], model_kwargs['charge'])
-                #classifiger_log_prob_xt.sum().backward()
-                guide_loss.backward(torch.ones_like(guide_loss))
-                guide_log_prob_xt = xt_one_hot.grad
-              # 2*all_grads - current_token_grads
-              guide_log_prob_ratio = (guide_log_prob_xt - (xt_one_hot * guide_log_prob_xt).sum(dim=-1, keepdim=True)).detach().requires_grad_(False)
-              guide_log_prob = (guide_log_prob_ratio + guide_log_prob_xt).detach().requires_grad_(False)
-        
-              # Apply guidance
-              with torch.no_grad():
-                guided_log_probs = (gamma * guide_log_prob) + diffusion_log_probs
-                copy_flag = x != self.mask_index
-                guided_log_probs[copy_flag] = self.neg_infinity
-                guided_log_probs[copy_flag, x[copy_flag]] = 0.0     
-              q_xs = guided_log_probs.softmax(dim=-1)
+          q_xs = self.apply_cbg(logp_x0, move_chance_s, move_chance_t, guide_model, x, sigma_t, model_kwargs, gamma)
       else:
-          #assert move_chance_t.ndim == p_x0.ndim
+          assert move_chance_t.ndim == p_x0.ndim
           # Sampling
           q_xs = p_x0 * (move_chance_t - move_chance_s) * (p_x0 > self.config['sampling']['min_prob']).float()
           q_xs[p_x0 > self.config['sampling']['max_prob']] = 1e10

@@ -213,7 +213,7 @@ decoder_mdlm:
       p_uncond: 0
       w: 2
   cbg:
-    model_wts: #/cmnfs/proj/diffusion/experiments/regressor/2026-04-08_14-40-14
+    model_wts: /cmnfs/proj/diffusion/experiments/regressor/2026-04-08_14-40-14
     gamma: 20
 decoder_d3pm:
   steps: 100
