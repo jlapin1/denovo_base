@@ -45,7 +45,7 @@ def init_decoder_weights(module):
 
 def get_max_dic_value(dictionary, plus=1):
     # Must have at least as many embeddings as maximum integer
-    return np.max(list(dictionary.values())) + plus
+    return np.max(list(dictionary.values())).item() + plus
 
 class base_diffusion_decoder(nn.Module):
     def __init__(self, 
@@ -523,7 +523,7 @@ class MDLMDecoder(base_diffusion_decoder):
             self.block_size = None
 
     def finish_dict(self):
-        self.outdict['<SOS>'] = int(get_max_dic_value(self.outdict)) # TODO backwards compat. for checkpoints prior to Dec2025 REMOVE once you have new weights.
+        #self.outdict['<SOS>'] = int(get_max_dic_value(self.outdict)) # TODO backwards compat. for checkpoints prior to Dec2025 REMOVE once you have new weights.
         self.outdict['<MASK>'] = int(get_max_dic_value(self.outdict))
         self.MASK = self.outdict['<MASK>']
         self.rev_outdict = {n:m for m,n in self.outdict.items()}

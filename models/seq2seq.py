@@ -343,6 +343,7 @@ class Seq2SeqMDLM(Seq2Seq):
         # Scale
         if 'masses_path' in kwargs:
             self.str2mass, self.int2mass, self.masses = mass_objects(kwargs['masses_path'], self.decoder.outdict)
+            self.masses = nn.Parameter(self.masses, requires_grad=False)
 
         self.rl_subs = [value for key, value in token_dict.items() if key[0] in reinforcement_subs]
     

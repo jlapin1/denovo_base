@@ -930,6 +930,7 @@ class DenovoMDLMObj(BaseDenovo):
         self.weightmat = lambda length, p=0.1: (math.log(1-p)*((th.arange(length)[None]-th.arange(length)[:,None]).abs()-1) + math.log(p)).exp() * 0.5 * (th.eye(length)==0).float()
         self.BlockMasks = lambda typ, sequence_length, block_size, precursor_token=False: U.BlockMasks(typ, sequence_length, block_size, precursor_token)#.to(device)
         
+        self.mdlm_config = config['decoder_mdlm']
         diff_config = config['decoder_mdlm']['diffusion_config']
         self.diff_config = diff_config
         self.max_length = diff_config['model']['length']
@@ -970,20 +971,20 @@ class DenovoMDLMObj(BaseDenovo):
         #self.model.to(device)
         self.accelerate()
 
-        if self.config['decoder_mdlm']['cbg']['model_wts'] is not None:
+        if self.mdlm_config['cbg']['model_wts'] is not None:
             from models.diff_classifier import Regressor4MDLM
             self.guide_model = Regressor4MDLM(
                 self.model,
                 self.data.amod_dic,
                 null_token = self.data.amod_dic['X'],
             )
-            weights_path = glob(os.path.join(self.config['decoder_mdlm']['cbg']['model_wts'], "weights", "*.wts"))
+            weights_path = glob(os.path.join(self.mdlm_config['cbg']['model_wts'], "weights", "*.wts"))
             load = th.load(weights_path[0], map_location=device, weights_only=False)
             self.guide_model.load_state_dict(load)
             self.guide_model.eval()
             self.guide_model.to(device)
             self.eval_kwargs['guide_model'] = self.guide_model
-            self.eval_kwargs['gamma'] = self.config['decoder_mdlm']['cbg']['gamma']
+            self.eval_kwargs['gamma'] = self.mdlm_config['cbg']['gamma']
             print(f"<MRCOMMENT> Using guided diffusion with gamma={self.eval_kwargs['gamma']}")
 
         if self.accelerator.is_local_main_process:
@@ -1022,6 +1023,14 @@ class DenovoMDLMObj(BaseDenovo):
         loss_mask = self.model.decoder.sequence_mask(target)
         
         return None, target, loss_mask
+    
+    def mass_error(self, model_output, target_intseq, masked_token_mask):
+        target_mass = self.model.decoder.scale.intseq2mass(target_intseq)
+        one_hot = F.one_hot(target_intseq, self.model.decoder.predcats)
+        correct_probabilities = th.where(masked_token_mask[...,None], one_hot, model_output.softmax(-1))
+        pred_mass = (correct_probabilities*self.model.masses).sum(-1).sum(1)
+        mass_error = (pred_mass-target_mass).square()
+        return mass_error
 
     def train_step(self, batch):
         block_decoding = True if self.model.decoder.block_size is not None else False
@@ -1031,7 +1040,7 @@ class DenovoMDLMObj(BaseDenovo):
         self._model.train()
         self._model.zero_grad()
         
-        # accelerate ONLY works when the train_step calls the most proximate model's (seq2seq) forward function.
+        # NOTE: accelerate ONLY works when the train_step calls the most proximate model's (seq2seq) forward function.
         # - That is what is returned by accelerate's prepare function
         # - separating the encoder's forward pass from the decoder's prevents synchronization
         if self.diff_config['custom_loss']:
@@ -1039,16 +1048,22 @@ class DenovoMDLMObj(BaseDenovo):
             loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
             weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
             loss = (weights*loss)[masked_token_mask]
-            other_losses = {}
+            token_loss = loss.mean()
+            other_losses = {'token_loss': token_loss.item()}
         else:
-            loss, other_losses = self._model(batch, target, training_mask, block_decoding)
+            token_loss, other_losses = self._model(batch, target, training_mask, block_decoding)
 
+        loss = token_loss
+        
+        if self.mdlm_config['loss']['mass_weight'] is not None:
+            mass_loss = self.mass_error(model_output, target, masked_token_mask).mean()
+            other_losses['mass_mse'] = mass_loss.item()
+            loss += self.mdlm_config['loss']['mass_weight'] * mass_loss
 
-        token_nll = loss.mean()
-        losses = {'loss': token_nll.item()} | other_losses
+        losses = {'loss': loss.item()} | other_losses
         
         #token_nll.backward()
-        self.accelerator.backward(token_nll)
+        self.accelerator.backward(loss)
         self.update_lr()
         # Inside the loop, after backward()
         #for name, param in self._model.named_parameters():
