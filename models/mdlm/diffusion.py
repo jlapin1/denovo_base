@@ -333,7 +333,7 @@ class Diffusion:
       diffusion_log_probs[..., self.mask_index] = torch.log(move_chance_s / move_chance_t)[:, :, 0] # + torch.log(move_chance_t)
       diffusion_log_probs.detach()
       # Compute guided posterior
-      if True: # approx
+      if self.config['cbg']['use_approx']: # approx
           with torch.enable_grad():
             guide_out = guide_model(x, t=sigma_t)
             xt_one_hot = guide_out['one_hot']
@@ -344,14 +344,50 @@ class Diffusion:
           # 2*all_grads - current_token_grads
           guide_log_prob_ratio = (guide_log_prob_xt - (xt_one_hot * guide_log_prob_xt).sum(dim=-1, keepdim=True)).detach().requires_grad_(False)
           guide_log_prob = (guide_log_prob_ratio + guide_log_prob_xt).detach().requires_grad_(False)
-          
-          # Apply guidance
-          with torch.no_grad():
-            guided_log_probs = (gamma * guide_log_prob) + diffusion_log_probs
-            copy_flag = x != self.mask_index
-            guided_log_probs[copy_flag] = self.neg_infinity
-            guided_log_probs[copy_flag, x[copy_flag]] = 0.0     
-          q_xs = guided_log_probs.softmax(dim=-1)
+      else:
+          bsz, seq_len = x.shape
+          # Create bsz*seq_len*N copies of input sequences
+          # Shape: (bsz, 1, seq_len) -> (bsz, seq_len*N, seq_len)
+          # where N = vocab_size
+          xt_expand = x.unsqueeze(1).repeat(1, seq_len * self.vocab_size, 1)
+          # Flatten batch and transition dimensions
+          # Shape: (bsz, seq_len*N, seq_len) -> (bsz*seq_len*N, seq_len)
+          xt_expand = xt_expand.view(-1, seq_len)
+
+          # Create indices for all possible transitions
+          # Shape: (seq_len*N,) -> (bsz, seq_len*N) -> (bsz*seq_len*N,)
+          jump_idx = torch.arange(seq_len * self.vocab_size).to(x.device)
+          jump_idx = jump_idx.repeat(bsz, 1).flatten()
+
+          # Create tensor for states after one transition
+          xt_jumps = xt_expand.clone()
+
+          # Calculate which dimensions changes for each transition
+          # Shape: (bsz*seq_len*N,)
+          jump_dims = jump_idx // self.vocab_size
+
+          # Calculate new value for changed dimension
+          # Shape: (bsz*seq_len*N,)
+          jump_states = jump_idx % self.vocab_size
+
+          # Apply transitions by assigning new values at transition dimensions
+          # Shape: (bsz*seq_len*N, seq_len)
+          xt_jumps[
+            torch.arange(jump_idx.size(0), device=x.device),
+            jump_dims, # Index the transitioned dimension
+          ] = jump_states
+
+          guide_out = guide_model(xt_jumps, t=sigma_t.repeat(seq_len * self.vocab_size, 1))
+          guide_log_prob = guide_model.get_backprop_prop(guide_out['out'], **model_kwargs)
+      
+      # Apply guidance
+      with torch.no_grad():
+        guided_log_probs = (gamma * guide_log_prob) + diffusion_log_probs
+        copy_flag = x != self.mask_index
+        guided_log_probs[copy_flag] = self.neg_infinity
+        guided_log_probs[copy_flag, x[copy_flag]] = 0.0     
+      q_xs = guided_log_probs.softmax(dim=-1)
+
       return q_xs
 
   def _ddpm_caching_update(

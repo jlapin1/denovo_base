@@ -971,20 +971,20 @@ class DenovoMDLMObj(BaseDenovo):
         #self.model.to(device)
         self.accelerate()
 
-        if self.mdlm_config['cbg']['model_wts'] is not None:
+        if self.diff_config['cbg']['model_wts'] is not None:
             from models.diff_classifier import Regressor4MDLM
             self.guide_model = Regressor4MDLM(
                 self.model,
                 self.data.amod_dic,
                 null_token = self.data.amod_dic['X'],
             )
-            weights_path = glob(os.path.join(self.mdlm_config['cbg']['model_wts'], "weights", "*.wts"))
+            weights_path = glob(os.path.join(self.diff_config['cbg']['model_wts'], "weights", "*.wts"))
             load = th.load(weights_path[0], map_location=device, weights_only=False)
             self.guide_model.load_state_dict(load)
             self.guide_model.eval()
             self.guide_model.to(device)
             self.eval_kwargs['guide_model'] = self.guide_model
-            self.eval_kwargs['gamma'] = self.mdlm_config['cbg']['gamma']
+            self.eval_kwargs['gamma'] = self.diff_config['cbg']['gamma']
             print(f"<MRCOMMENT> Using guided diffusion with gamma={self.eval_kwargs['gamma']}")
 
         if self.accelerator.is_local_main_process:

@@ -44,7 +44,7 @@ def main():
     # Model #
     #########
     
-    diff_dir = "save/2026-04-03_16-08-34"
+    diff_dir = "save/2026-04-03_16-08-34" # If you change this, write down what regressor it goes to
     model = Regressor4MDLM(
         diff_dir,
         loader.amod_dic,
