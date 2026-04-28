@@ -778,7 +778,7 @@ class Diffusion:
   def _sample_t(self, n, device):
     _eps_t = torch.rand(n, device=device)
     if self.antithetic_sampling:
-      bounds = self.config['training']['antithetical_bounds']
+      bounds = self.config['training']['antithetic_bounds']
       if bounds is None:
         offset = torch.arange(n, device=device) / n
       else:
