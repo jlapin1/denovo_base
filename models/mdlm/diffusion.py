@@ -105,13 +105,6 @@ class Diffusion:
     self.eval_model_tokenizer = None
 
     self.noise = noise_schedule.get_noise(self.config, dtype=torch.float32)
-    """if self.config['training']['ema'] > 0:
-      self.ema = ema.ExponentialMovingAverage(
-        itertools.chain(self.backbone.parameters(),
-                        self.noise.parameters()),
-        decay=self.config['training']['ema'])
-    else:
-      self.ema = None"""
     
     #self.lr = self.config.optim.lr
     self.sampling_eps = self.config['training']['sampling_eps']
@@ -785,7 +778,11 @@ class Diffusion:
   def _sample_t(self, n, device):
     _eps_t = torch.rand(n, device=device)
     if self.antithetic_sampling:
-      offset = torch.arange(n, device=device) / n
+      bounds = self.config['training']['antithetical_bounds']
+      if bounds is None:
+        offset = torch.arange(n, device=device) / n
+      else:
+        offset = torch.linspace(*self.config['training']['antithetic_bounds'], n, device=device)
       _eps_t = (_eps_t / n + offset) % 1
     t = (1 - self.sampling_eps) * _eps_t + self.sampling_eps
     if self.importance_sampling:
