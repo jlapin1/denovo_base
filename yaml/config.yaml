@@ -99,6 +99,7 @@ encoder_dict:
   pw_attention_h: 2
   pw_n: 4
   pw_blocks: 0
+  empty: False
 
 # Decoder model
 
@@ -201,7 +202,7 @@ decoder_mdlm:
     training:
       ema: 0.9999
       antithetic_sampling: True
-      antithetic_bounds: [0.25, 0.99]
+      antithetic_bounds: [0.4, 0.99]
       importance_sampling: False
       sampling_eps: 1.0e-3
       change_of_variables: False

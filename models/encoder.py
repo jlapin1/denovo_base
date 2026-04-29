@@ -44,40 +44,42 @@ def init_encoder_weights(module):
     
 
 class Encoder(nn.Module):
-    def __init__(self,
-                 # 1D options
-                 in_units=2, # input units from mz/ab tensor
-                 running_units=512, # num units running throughout model
-                 sequence_length=100, # maximum number of peaks
-                 mz_units=512, # units in mz fourier vector
-                 ab_units=256, # units in ab fourier vector
-                 subdivide=False, # subdivide mz units in 2s and expand-concat
-                 use_charge=False, # inject charge into TransBlocks
-                 use_energy=False, # inject energy into TransBlocks
-                 use_mass=False, # injuect mass into TransBlocks
-                 ce_units=256, # units for transformation of mzab fourier vectors
-                 att_d=64, # attention qkv dimension units
-                 att_h=4,  # attention qkv heads
-                 gate=False, # input dependent gate following weights*V
-                 alphabet=False, # single parameters on residual and skip connections
-                 ffn_multiplier=4, # multiply inp units for 1st FFN transform
-                 prenorm=True, # normalization before attention/ffn layers
-                 norm_type='layer', # normalization type
-                 prec_type=None, # inject_pre | inject_ffn | inject_norm | None
-                 depth=9, # number of transblocks
-                 # Pairwise options
-                 bias=False, # use pairwise mz tensor to create SA-bias
-                 dropout=0, # dropout rate for residuals in attention and feed forward
-                 pw_mz_units=None, # sinusoidal units to expand pw tensor into
-                 pw_run_units=None, # units to project pw tensor to after sinusoidal expansion
-                 pw_attention_ch=32, # triangle attention channels
-                 pw_attention_h=4, # triangle attention heads
-                 pw_blocks=2, # number of pairstack blocks for pairwise features
-                 pw_n=4, # pair transition unit multiplier
-                 # Miscellaneous
-                 recycling_its=1, # recycling iterations
-                 device=th.device('cpu')
-                 ):
+    def __init__(
+        self,
+        # 1D options
+        in_units=2, # input units from mz/ab tensor
+        running_units=512, # num units running throughout model
+        sequence_length=100, # maximum number of peaks
+        mz_units=512, # units in mz fourier vector
+        ab_units=256, # units in ab fourier vector
+        subdivide=False, # subdivide mz units in 2s and expand-concat
+        use_charge=False, # inject charge into TransBlocks
+        use_energy=False, # inject energy into TransBlocks
+        use_mass=False, # injuect mass into TransBlocks
+        ce_units=256, # units for transformation of mzab fourier vectors
+        att_d=64, # attention qkv dimension units
+        att_h=4,  # attention qkv heads
+        gate=False, # input dependent gate following weights*V
+        alphabet=False, # single parameters on residual and skip connections
+        ffn_multiplier=4, # multiply inp units for 1st FFN transform
+        prenorm=True, # normalization before attention/ffn layers
+        norm_type='layer', # normalization type
+        prec_type=None, # inject_pre | inject_ffn | inject_norm | None
+        depth=9, # number of transblocks
+        # Pairwise options
+        bias=False, # use pairwise mz tensor to create SA-bias
+        dropout=0, # dropout rate for residuals in attention and feed forward
+        pw_mz_units=None, # sinusoidal units to expand pw tensor into
+        pw_run_units=None, # units to project pw tensor to after sinusoidal expansion
+        pw_attention_ch=32, # triangle attention channels
+        pw_attention_h=4, # triangle attention heads
+        pw_blocks=2, # number of pairstack blocks for pairwise features
+        pw_n=4, # pair transition unit multiplier
+        # Miscellaneous
+        recycling_its=1, # recycling iterations
+        device=th.device('cpu'),
+        **kwargs
+    ):
         super(Encoder, self).__init__()
         self.run_units = running_units
         self.sl = sequence_length

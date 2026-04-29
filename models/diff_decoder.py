@@ -10,6 +10,7 @@ import collections
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import heapq
 from models.diffusion.gaussian_diffusion import _extract_into_tensor
+device = th.device("cuda" if th.cuda.is_available() else 'cpu')
 
 def init_decoder_weights(module):
     if hasattr(module, 'first'):
@@ -152,7 +153,7 @@ class base_diffusion_decoder(nn.Module):
                 prenorm=prenorm, 
                 embed_type=embed_type,
                 embed_indim=timestep_dimension,
-                is_cross=True,
+                is_cross=False if kv_input_dimension is None else True,
                 kvindim=kv_input_dimension,
             ) 
             for _ in range(depth)
@@ -582,7 +583,14 @@ class MDLMDecoder(base_diffusion_decoder):
         return {'out': out, 'sa_cache': cache}
     
     def predict_sequence(self, embedding, batch, x_init=None, save_x=False, save_p=False, top=None, num_steps=None, progress=False, **kwargs):
-        bs = embedding.shape[0]
+        if 'batch_size' in kwargs:
+            bs = kwargs.pop('batch_size')
+        if embedding is not None:
+            bs = embedding.shape[0]
+            dev = embedding.device
+        else:
+            assert 'bs' in dir(), "batch_size must be specified for predict_sequence in unconditional mode"
+            dev = device
         model_kwargs = {
             'kv_features': embedding,
             'charge': batch['charge'] if 'charge' in batch else None,
@@ -591,9 +599,9 @@ class MDLMDecoder(base_diffusion_decoder):
         }
         blocks = int(1 if self.block_size == None else np.ceil(self.max_sl / self.block_size))
         
-        out = th.full((bs, self.max_sl), self.MASK, dtype=th.int64, device=embedding.device)
-        logits = th.empty((bs, self.max_sl, self.predcats), dtype=th.float32, device=embedding.device)
-        x = th.empty((bs, 0), dtype=th.int64).to(embedding.device)
+        out = th.full((bs, self.max_sl), self.MASK, dtype=th.int64, device=dev)
+        logits = th.empty((bs, self.max_sl, self.predcats), dtype=th.float32, device=dev)
+        x = th.empty((bs, 0), dtype=th.int64).to(dev)
         for m in range(blocks):
             
             # Add to input

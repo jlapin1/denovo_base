@@ -11,23 +11,26 @@ import numpy as np
 join = os.path.join
 
 def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
-    ab = example['intensity_array']
-    ab_sort = (-ab).argsort()[:top]
-    ab = ab[ab_sort]
-    ab /= ab.max()
-    spectrum_length = len(ab)
-    mz = example['mz_array'][ab_sort]
-    mz_sort = mz.argsort()
-    length = len(mz)
-    mz_ = np.zeros(top)
-    mz_[:len(mz_sort)] = mz[mz_sort]
-    ab_ = np.zeros(top)
-    ab_[:len(ab_sort)] = ab[mz_sort]
-    example['mz_array'] = mz_
-    example['intensity_array'] = ab_
-    example['precursor_charge'] = example['precursor_charge']
-    example['precursor_mass'] = example['precursor_mass']
-    example['spectrum_length'] = spectrum_length #len(example['mz_array'])
+    if 'intensity_array' in example:
+        ab = example['intensity_array']
+        ab_sort = (-ab).argsort()[:top]
+        ab = ab[ab_sort]
+        ab /= ab.max()
+        spectrum_length = len(ab)
+        example['spectrum_length'] = spectrum_length
+        mz = example['mz_array'][ab_sort]
+        mz_sort = mz.argsort()
+        length = len(mz)
+        mz_ = np.zeros(top)
+        mz_[:len(mz_sort)] = mz[mz_sort]
+        ab_ = np.zeros(top)
+        ab_[:len(ab_sort)] = ab[mz_sort]
+        example['mz_array'] = mz_
+        example['intensity_array'] = ab_
+    if 'precursor_charge' in example:
+        example['precursor_charge'] = example['precursor_charge']
+    if 'precursor_mass' in example:
+        example['precursor_mass'] = example['precursor_mass']
     if 'modified_sequence' in example:
         tokenized_sequence = tokenizer(example['modified_sequence'])
         peptide_length = len(tokenized_sequence)
@@ -35,21 +38,25 @@ def map_fn(example, tokenizer, dic=None, top=100, max_seq=50, reverse=False):
             tokenized_sequence = tokenized_sequence[::-1]
         example['tokenized_sequence'] = np.array([dic.get(m, dic['X']) for m in tokenized_sequence] + (max_seq-peptide_length)*[dic['X']], dtype=np.int32)
         example['peptide_length'] = peptide_length
-    if 'name' in example: example['experiment_name'] = example['name'] # compat
+    if 'name' in example:
+        example['experiment_name'] = example['name'] # compat
 
     return example
 
 def collate_fn(batch_list, custom_columns=[]):
     out = {}
     #out['experiment_name'] = np.array([m['experiment_name'] for m in batch_list])
-    out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
-    #maxlength = out['length'].max()
-    #out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
-    out['mz'] = th.tensor(np.stack([m['mz_array'] for m in batch_list]), dtype=th.float32)
-    #out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
-    out['ab'] = th.tensor(np.stack([m['intensity_array'] for m in batch_list]), dtype=th.float32)
-    out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
-    out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
+    if 'intensity_array' in batch_list[0]:
+        out['length'] = th.tensor(np.stack([m['spectrum_length'] for m in batch_list]), dtype=th.int32)
+        #maxlength = out['length'].max()
+        #out['mz'] = th.tensor(np.stack([m['mz_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+        out['mz'] = th.tensor(np.stack([m['mz_array'] for m in batch_list]), dtype=th.float32)
+        #out['ab'] = th.tensor(np.stack([m['intensity_array'][:maxlength] for m in batch_list]), dtype=th.float32)
+        out['ab'] = th.tensor(np.stack([m['intensity_array'] for m in batch_list]), dtype=th.float32)
+    if 'precursor_charge' in batch_list[0]:
+        out['charge'] = th.tensor(np.stack([m['precursor_charge'] for m in batch_list]), dtype=th.int32)
+    if 'precursor_mass' in batch_list[0]:
+        out['mass'] = th.tensor(np.stack([m['precursor_mass'] for m in batch_list]), dtype=th.float32)
     if 'tokenized_sequence' in batch_list[0].keys():
         out['peplen'] = th.tensor(np.stack([m['peptide_length'] for m in batch_list]), dtype=th.int32)
         #out['intseq'] = th.tensor(np.stack([m['tokenized_sequence'][:out['peplen'].max()] for m in batch_list]), dtype=th.int32)

@@ -106,12 +106,14 @@ class Seq2Seq(nn.Module):
     ):
         super(Seq2Seq, self).__init__()
         self.encoder_dict = encoder_config
+        self.use_encoder = encoder_config['empty']==False
+        print("<S2SCOMMENT> Unconditional decoder - no spectrum encoding")
 
         self.encoder = Encoder(
             sequence_length=top_peaks,
             device=device,
             **encoder_config,
-        )
+        ) if self.use_encoder else None
     
     def total_params(self):
         return sum([m.numel() for m in self.parameters() if m.requires_grad])
@@ -325,7 +327,7 @@ class Seq2SeqMDLM(Seq2Seq):
             top_peaks=top_peaks,
         )
         # Decoder model
-        decoder_config['kv_indim'] = self.encoder.run_units
+        decoder_config['kv_indim'] = self.encoder.run_units if self.use_encoder else None
         decoder_config['embed_type'] = 'preembed' if diff_config['time_conditioning'] else None
         self.decoder = MDLMDecoder(
             token_dict          = token_dict,
@@ -376,17 +378,23 @@ class Seq2SeqMDLM(Seq2Seq):
         return batch
 
     def forward_eval(self, batch, top=None, save_x=False, save_p=False, num_steps=None, progress=False, **kwargs):
-        dictionary = self.encoder_embedding(batch)
-        embedding = dictionary['emb']
-        spectrum_mask = dictionary['mask']
+        if self.use_encoder:
+            dictionary = self.encoder_embedding(batch)
+            embedding = dictionary['emb']
+            spectrum_mask = dictionary['mask']
+        else:
+            embedding = spectrum_mask = None
         decout = self.decoder.predict_sequence(embedding, batch, top=top, save_x=save_x, save_p=save_p, num_steps=num_steps, progress=progress, **kwargs)
         return decout
 
     def forward(self, batch, target, training_mask=None, block_decoding=False, rl=False):
         forward_function = self.contrastive_loss if rl else self.decoder.diff_obj._forward_pass_diffusion
-        dictionary = self.encoder_embedding(batch)
-        embedding = dictionary['emb']
-        spectrum_mask = dictionary['mask']
+        if self.use_encoder:
+            dictionary = self.encoder_embedding(batch)
+            embedding = dictionary['emb']
+            spectrum_mask = dictionary['mask']
+        else:
+            embedding = spectrum_mask = None
         model_kwargs = {
             'charge': batch['charge'] if 'charge' in batch else None,
             'mass': batch['mass'] if 'mass' in batch else None,
@@ -400,6 +408,7 @@ class Seq2SeqMDLM(Seq2Seq):
     def predict_sequence(
         self, 
         batch: dict,                # batch of inputs
+        batch_size: int=None,       # batch_size; to be used for unconditional mode
         save_x: bool=False,         # return the intseqs at every step
         save_p: bool=False,         # return the logits at every step
         num_steps: int=None,        # number of sampling steps in decoder
@@ -411,7 +420,7 @@ class Seq2SeqMDLM(Seq2Seq):
         gamma: int=1.,              # scaler for guidance
     ):
         # Input batch
-        batch_size, SL = batch['mz'].shape
+        batch_size, SL = batch['mz'].shape if 'mz' in batch else (batch['charge'].shape[0] if 'charge' in batch else batch_size)
         n = self.ens_size if n==None else n
         batch = expand_batch(batch, n=n)
         
@@ -425,6 +434,7 @@ class Seq2SeqMDLM(Seq2Seq):
             progress=progress,
             guide_model=guide_model,
             gamma=gamma,
+            batch_size=batch_size,
         )
         seqs = diffout.pop('prediction')
         logits = diffout.pop('logits')

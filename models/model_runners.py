@@ -417,7 +417,7 @@ class BaseDenovo:
         no_grad=True, 
         kwargs={}
     ):
-        # Sanity check
+        # Sanity check for multi-GPU
         #for name, param in self._model.named_parameters():
         #    if len(param.shape)>0:
         #        # Gather the weight from all GPUs and check if they match
@@ -480,13 +480,14 @@ class BaseDenovo:
 
             #print("\rEvaluation step %d"%(i+1), end='')
             batchdev = U.Dict2dev(batch, device)
+            tentative_batch_size = self.config['batch_size']
             if no_grad:
                 with th.no_grad():
                     seqint, target, loss_mask = self.inptarg(batchdev)
-                    out_dict = self.model.predict_sequence(batchdev, **kwargs)
+                    out_dict = self.model.predict_sequence(batchdev, batch_size=tentative_batch_size, **kwargs)
             else:
                 seqint, target, loss_mask = self.inptarg(batchdev)
-                out_dict = self.model.predict_sequence(batchdev, **kwargs)
+                out_dict = self.model.predict_sequence(batchdev, batch_size=tentative_batch_size, **kwargs)
             prediction = out_dict.pop('prediction')
             probs = out_dict.pop('logits')
             
@@ -1062,9 +1063,10 @@ class DenovoMDLMObj(BaseDenovo):
 
         losses = {'loss': loss.item()} | other_losses
         
-        #token_nll.backward()
         self.accelerator.backward(loss)
         self.update_lr()
+        
+        # Sanity check for multi-GPU
         # Inside the loop, after backward()
         #for name, param in self._model.named_parameters():
         #    grad = param.grad
