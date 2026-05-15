@@ -18,7 +18,7 @@ lr_warmup_steps: 20000
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 2250000 # 1000000
+lr_decay_steps: 1400000 # 1000000
 
 ############################
 # Loading, logging, saving #
@@ -202,7 +202,7 @@ decoder_mdlm:
     training:
       ema: 0.9999
       antithetic_sampling: True
-      antithetic_bounds: [0.4, 0.99]
+      antithetic_bounds: [0.7, 0.99]
       importance_sampling: False
       sampling_eps: 1.0e-3
       change_of_variables: False

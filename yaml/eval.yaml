@@ -2,11 +2,11 @@
 eval_only:
   eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
   datapath_extension: parquet/processed
-  eval_name: cerevisiae
-  set: test # key name in D.data.dataloader/dataset
+  eval_name: Akkermansia
+  set: val # key name in D.data.dataloader/dataset
   val_steps: 100
   disperse: False
-  save: True
+  save: False
   stream: False
   outpath: ./hold.parquet
   # diffusion only
@@ -26,5 +26,6 @@ eval_only:
     - mass
     - aa_prob_min
     - pep_prob_min
+
 eval_train: 
   set: val
