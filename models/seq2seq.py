@@ -107,7 +107,8 @@ class Seq2Seq(nn.Module):
         super(Seq2Seq, self).__init__()
         self.encoder_dict = encoder_config
         self.use_encoder = encoder_config['empty']==False
-        print("<S2SCOMMENT> Unconditional decoder - no spectrum encoding")
+        if not self.use_encoder:
+            print("<S2SCOMMENT> Unconditional decoder - no spectrum encoding")
 
         self.encoder = Encoder(
             sequence_length=top_peaks,
