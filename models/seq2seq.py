@@ -189,7 +189,7 @@ class Seq2SeqAR(Seq2Seq):
         logits = self.decoder(intseq, embedding, batch)
         return logits
 
-    def predict_sequence(self, batch):
+    def predict_sequence(self, batch, **kwargs):
         embedding = self.encoder_embedding(batch)
         out_dict = self.decoder.predict_sequence(embedding, batch)
         return out_dict
