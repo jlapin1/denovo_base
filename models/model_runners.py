@@ -519,8 +519,8 @@ class BaseDenovo:
             }
 
             # PPM
-            pred_masses = self.model.decoder.scale.intseq2mz(prediction, batchdev['charge'])
-            ppms = U.deltaPPM(batchdev['mass'], pred_masses)
+            pred_masses = self.model.decoder.scale.intseq2mz(prediction, batch['charge'].to(device))
+            ppms = U.deltaPPM(batch['mass'].to(device), pred_masses)
             out['ppm'] += ppms.sum()
 
             # Add to totals

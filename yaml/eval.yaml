@@ -1,12 +1,12 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
-  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/kingdoms # None: use config.yaml setting, else: override
+  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2 # None: use config.yaml setting, else: override
   datapath_extension: parquet/processed
-  eval_name: Akkermansia
+  eval_name: vigna
   set: val # key name in D.data.dataloader/dataset
   val_steps: 100
-  disperse: False
-  save: False
+  disperse: True
+  save: True
   stream: False
   outpath: ./hold.parquet
   # diffusion only
@@ -17,6 +17,7 @@ eval_only:
     #num_steps: 20
     #save_x: True
     #save_p: True
+    n: 5
   inference_save_keys:
     - experiment_name
     - file_index
