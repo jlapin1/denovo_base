@@ -163,7 +163,7 @@ class LoaderObj:
             for file in exclude_files:
                 if file in include_files:
                     include_files.remove(file)
-                    print(f"<LOADCOMMENT> Removed {file.split('/')[-1]} from training")
+                    #print(f"<LOADCOMMENT> Removed {file.split('/')[-1]} from training")
         
         dataset = load_dataset(
             'parquet',
@@ -242,8 +242,8 @@ class LoaderHF(LoaderObj):
         dataset, train_files = self._load_dataset(join(train_dataset_path, dpe), train_name, val_name, ext='parquet')
         dataset_val, val_files = self._load_dataset(join(val_dataset_path, dpe), val_name)
 
-        print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
-        print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
+        #print(f"<LOADCOMMENT> Found {len(train_files)} file(s) for training")
+        #print(f"<LOADCOMMENT> Found {len(val_files)} file(s) for validation")
         
         dataset['val'] = dataset_val['train']
 
@@ -315,7 +315,7 @@ class LoaderHF(LoaderObj):
         # Filter val set for dispersed examples
         if ('val_steps' in kwargs.keys()) and ('disperse' in kwargs.keys()):
             if kwargs['disperse'] and (kwargs['val_steps'] is not None):
-                print(f"<LOADCOMMENT> Dispersing validation set into {kwargs['val_steps']} batches")
+                #print(f"<LOADCOMMENT> Dispersing validation set into {kwargs['val_steps']} batches")
                 every_n_ = self.val_size // batch_size // kwargs['val_steps']
                 if every_n_ > 2:
                     every_n_ -= 1 # minus 1 to be safe (charge and length filter make dataset shorter)
@@ -566,8 +566,8 @@ class LoaderRegr(LoaderObj):
             return {'intseq': intseq, 'real_mass': real_mass, 'labels': labels}
 
         self.dataloader = {
-            'train': self.build_dataloader(dataset['train'], batch_size, 0, local_collate_fn),
-            'test': self.build_dataloader(dataset['test'], batch_size, 0, local_collate_fn),
+            'train': self.build_dataloader(dataset['train'], batch_size, 0, local_collate_fn, persistent_workers=False),
+            'test': self.build_dataloader(dataset['test'], batch_size, 0, local_collate_fn, persistent_workers=False),
         }
 
     def append_null_token(self, intseq):

@@ -1,5 +1,5 @@
 import torch as th
-from loader import LoaderHF
+from ..loader import LoaderHF
 import numpy as np
 from models.diff_classifier import Classifier
 import os
@@ -113,7 +113,7 @@ class BaseDenovo:
 
     def load_saved_weights(self, obj, weights_type='model', load_last=False, retain=False):
         regex = f'*{weights_type}*last*wts*' if load_last else f"*{weights_type}*wts*"
-        print(f"<MRCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
+        #print(f"<MRCOMMENT> Searching for {weights_type} weights with regular expression {regex}")
         possible_weights_path = glob(os.path.join(self.rddir, "weights", regex))
         
         # Found something
@@ -133,7 +133,7 @@ class BaseDenovo:
                     weights_path = [m for m in glob(possible_weights_path) if 'last' in m][0]
                     qualifier = '"last"'
             
-            print(f"<MRCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
+            #print(f"<MRCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
             obj.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
             if retain:
@@ -193,13 +193,16 @@ class BaseDenovo:
             self.data.dataloader['train'],
             total=train_steps,
             smoothing=0.6,
-            disable=not self.accelerator.is_local_main_process
+            disable=not self.accelerator.is_local_main_process,
+            leave=False,
         )
 
         epoch_start = time()
         step_end=epoch_start
         for step, batch in enumerate(pbar):      
             step_start = time()
+            #if step==10:
+            #    break
             
             if self.config['log_wandb'] and self.accelerator.is_local_main_process: 
                 wandb.log({"Learning rate": self.opt.param_groups[-1]['lr']})
@@ -241,8 +244,8 @@ class BaseDenovo:
         if self.log and (len(self.running_loss) > 0):
             self.savetxt(self.running_loss)
             self.running_loss = []
-        if self.accelerator.is_local_main_process:
-            print("\rFinal running loss: %s, Final time elapsed: %.0f s"%(loss_printout, time()-epoch_start))
+        #if self.accelerator.is_local_main_process:
+        #    print("\rFinal running loss: %s, Final time elapsed: %.0f s"%(loss_printout, time()-epoch_start))
         
     def savetxt(self, train_loss=None, eval_stats=None):
         if eval_stats is not None:
@@ -607,30 +610,30 @@ class BaseDenovo:
             self.on_train_epoch_end()
             
             # Eval
-            if self.accelerator.is_local_main_process:
+            if self.accelerator.is_local_main_process and i==(self.config['epochs']-1):
                 if self.eval_frequency is None:
                     out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
-                    new_score = out[self.config["high_score"]]
-                    if self.config['save_weights']: self.checkpoint(new_score)
+                    #new_score = out[self.config["high_score"]]
+                    #if self.config['save_weights']: self.checkpoint(new_score)
                 
                     # Logging
-                    if self.config['log_wandb']:
-                        out['epoch'] = i+1
-                        wandb.log(out)
-                        out.pop('epoch')
+                    #if self.config['log_wandb']:
+                    #    out['epoch'] = i+1
+                    #    wandb.log(out)
+                    #    out.pop('epoch')
                 else:
                     out = self.eval_out if hasattr(self, 'eval_out') else self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)[0]
-                    new_score = out[self.config["high_score"]]
+                    #new_score = out[self.config["high_score"]]
             
-                specifier = " ".join(len(out)*['%s'])
-                write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
-                line = "ValEpoch %d: %s"%(i, write_out)
+                #specifier = " ".join(len(out)*['%s'])
+                #write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
+                #line = "ValEpoch %d: %s"%(i, write_out)
                 
-                if (new_score > self.high_score):
-                    highline = line
-                line += " (%.1f s)"%(time()-start_time)
-                lines.append(line)
-                if self.accelerator.is_local_main_process: print("\r"+line)
+                #if (new_score > self.high_score):
+                #    highline = line
+                #line += " (%.1f s)"%(time()-start_time)
+                #lines.append(line)
+                #if self.accelerator.is_local_main_process: print("\r"+line)
                 
                 # Saving the checkpoint
                 #if self.config['save_weights']:
@@ -642,14 +645,14 @@ class BaseDenovo:
                     #    for file in glob(os.path.join(wtsdir, "*high*")): os.remove(file)
                     #    self.save_weights(os.path.join(wtsdir, f"model_{ext}.wts"))
                 
-                self.eval_stats.append(list(out.values()))
+                self.eval_stats.append(out)
                 
                 # Save data
-                if self.log:
-                    self.savetxt(train_loss=None, eval_stats=np.array(self.eval_stats))
+                #if self.log:
+                #    self.savetxt(train_loss=None, eval_stats=np.array(self.eval_stats))
             self.accelerator.wait_for_everyone()
 
-        return lines, highline
+        return self.eval_stats
 
     def on_train_epoch_end(self, *args, **kwargs):
         pass
@@ -664,7 +667,7 @@ class BaseDenovo:
         return state_dict
 
 class DenovoArObj(BaseDenovo):
-    def __init__(self, config, svdir='./dswts/', rddir=None):
+    def __init__(self, config, svdir='./dswts/', rddir=None, encoder_model=None):
         super().__init__(
             config=config,
             svdir=svdir,
@@ -680,12 +683,26 @@ class DenovoArObj(BaseDenovo):
             decoder_config = config['decoder_ar'],
             token_dict     = self.data.amod_dic,
             top_peaks      = config['top_peaks'],
+            encoder_model  = encoder_model,
         )
-        
 
-        print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+        pretrained_encoder_path = config.get('pretrained_encoder_path')
+        if pretrained_encoder_path:
+            #print(f"<MRCOMMENT> Loading pretrained encoder weights from {pretrained_encoder_path}")
+            encoder_state = th.load(pretrained_encoder_path, map_location=device, weights_only=False)
+            self.model.encoder.load_state_dict(encoder_state)
 
-        self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
+        self.freeze_encoder = config.get('freeze_encoder', False)
+        if self.freeze_encoder:
+            #print("<MRCOMMENT> Freezing encoder weights")
+            for param in self.model.encoder.parameters():
+                param.requires_grad = False
+            self.model.encoder.eval()
+
+        #print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        self.opt = th.optim.Adam(trainable_params, self.starting_lr)
 
         self.predict_sequence = self.model.decoder.predict_sequence
         
@@ -697,8 +714,8 @@ class DenovoArObj(BaseDenovo):
         
         self.accelerate()
 
-        if self.accelerator.is_local_main_process:
-            print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+        #if self.accelerator.is_local_main_process:
+            #print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
 
         if self.config['rl']:
             self.make_reference_model()
@@ -739,6 +756,8 @@ class DenovoArObj(BaseDenovo):
         
         #self.model.to(device)
         self._model.train()
+        if self.freeze_encoder:
+            self.model.encoder.eval()
         self._model.zero_grad()
         logits = self._model(dec_input, batch)
         all_loss = self.LossFunction(target, logits, loss_mask)
@@ -792,7 +811,7 @@ class DenovoDiffusionObj(BaseDenovo):
             masses_path = config['loader']['masses_path'],
         )
 
-        print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+        #print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
         
         # loading previous weights
@@ -965,7 +984,7 @@ class DenovoMDLMObj(BaseDenovo):
             self.training_mode = 'rl'
             self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
             self.make_reference_model()
-            print(f"<MRCOMMENT> Reference model created for reinforcement learning")
+            #print(f"<MRCOMMENT> Reference model created for reinforcement learning")
         else:
             self.training_mode = 'normal'
 
@@ -986,10 +1005,10 @@ class DenovoMDLMObj(BaseDenovo):
             self.guide_model.to(device)
             self.eval_kwargs['guide_model'] = self.guide_model
             self.eval_kwargs['gamma'] = self.diff_config['cbg']['gamma']
-            print(f"<MRCOMMENT> Using guided diffusion with gamma={self.eval_kwargs['gamma']}")
+            #print(f"<MRCOMMENT> Using guided diffusion with gamma={self.eval_kwargs['gamma']}")
 
-        if self.accelerator.is_local_main_process:
-            print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+        #if self.accelerator.is_local_main_process:
+            #print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
 
     def initialize_token_loss(self):
         self.token_loss = th.zeros(self.steps, self.diff_config['model']['length'], device=device)
@@ -1154,7 +1173,7 @@ class DenovoD3PMObj(BaseDenovo):
         )
 
         # Optimizer
-        print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
+        #print(f"<MRCOMMENT> Total model parameters: {self.model.total_params():,}")
         self.opt = th.optim.Adam(self.model.parameters(), self.starting_lr)
 
         self.restore_model()

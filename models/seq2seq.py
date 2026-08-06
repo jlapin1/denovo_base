@@ -2,6 +2,7 @@ import torch as th
 from torch import nn
 from torch.nn import functional as F
 from models.encoder import Encoder
+from models.foundational_encoder import Encoder as FoundationalEncoder
 from models.diff_decoder import DenovoDiffusionDecoder, MDLMDecoder, D3PMDecoder
 from models.decoder import DenovoDecoder
 from models.diffusion.model_utils import create_diffusion
@@ -102,6 +103,8 @@ class Seq2Seq(nn.Module):
         self,
         encoder_config,
         top_peaks,
+        encoder_cls=Encoder,
+        encoder_model=None,
         **kwargs
     ):
         super(Seq2Seq, self).__init__()
@@ -109,12 +112,15 @@ class Seq2Seq(nn.Module):
         self.use_encoder = encoder_config['empty']==False
         if not self.use_encoder:
             print("<S2SCOMMENT> Unconditional decoder - no spectrum encoding")
-
-        self.encoder = Encoder(
-            sequence_length=top_peaks,
-            device=device,
-            **encoder_config,
-        ) if self.use_encoder else None
+        
+        if encoder_model == None:
+            self.encoder = encoder_cls(
+                sequence_length=top_peaks,
+                device=device,
+                **encoder_config,
+            ) if self.use_encoder else None
+        else:
+            self.encoder = encoder_model
     
     def total_params(self):
         return sum([m.numel() for m in self.parameters() if m.requires_grad])
@@ -165,16 +171,19 @@ class Seq2SeqAR(Seq2Seq):
         decoder_config,
         top_peaks,
         token_dict,
+        encoder_model,
         **kwargs,
     ):
         super().__init__(
             encoder_config=encoder_config,
             top_peaks=top_peaks,
+            encoder_cls=FoundationalEncoder,
+            encoder_model=encoder_model,
         )
         decoder_config['kv_indim'] = self.encoder.run_units
         self.decoder = DenovoDecoder(
-            token_dict=token_dict, 
-            dec_config=decoder_config, 
+            token_dict=token_dict,
+            dec_config=decoder_config,
             encoder=self.encoder,
         )
 
