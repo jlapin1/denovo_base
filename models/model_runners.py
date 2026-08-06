@@ -182,7 +182,7 @@ class BaseDenovo:
     def make_reference_model(self, freeze=True):
         self.model.make_reference_model(freeze=freeze)
 
-    def train_epoch(self, svfreq=10000):
+    def train_epoch(self, svfreq=10000, epoch=0):
         
         bs = self.global_batch_size #config['batch_size']
         running_loss = {key: deque(maxlen=20) for key in self.training_loss_keys}
@@ -214,14 +214,14 @@ class BaseDenovo:
             
             if self.accelerator.is_local_main_process:
                 if self.config['log_wandb'] and self.accelerator.is_local_main_process:
-                    loss_printout = 'Loss: %7f'%losses['loss']
+                    loss_printout = f'Loss: {losses["loss"]:.3f}'
                     global_grad_norm = U.global_grad_norm(self.model)
                     self.log_wandb(losses, global_grad_norm)
                 else:
                     for key in running_loss.keys(): running_loss[key].append(losses[key])
                     rlm = {key: np.mean(running_loss[key]) for key in running_loss.keys()}
-                    loss_printout = ", ".join(len(rlm)*['%s: %7f'])%tuple([m for n in rlm.items() for m in n])
-                pbar.set_description(f"Loss: {loss_printout}")
+                    loss_printout = ", ".join(len(rlm)*['%s: %7.3f'])%tuple([m for n in rlm.items() for m in n])
+                pbar.set_description(f"Epoch {epoch}, Loss: {loss_printout}")
             
             if self.accelerator.is_local_main_process:
                 self.running_loss.append(total_loss)
@@ -606,7 +606,7 @@ class BaseDenovo:
             
             # Train
             self.data.dataset['train'].set_epoch(i)
-            self.train_epoch()
+            self.train_epoch(epoch=i)
             self.on_train_epoch_end()
             
             # Eval
