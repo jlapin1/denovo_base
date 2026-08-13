@@ -205,7 +205,12 @@ class LoaderHF(LoaderObj):
         max_seq = pep_length[1] if pep_length is not None else None
         assert os.path.exists(join(train_dataset_path, dpe)), "Train dataset path doesn't exist"
         assert os.path.exists(join(val_dataset_path, dpe)), "Train dataset path doesn't exist"
-        
+
+        if 'scratch' in kwargs and kwargs['scratch']['use']:
+            train_dataset_path = kwargs['scratch']['train_path']
+            val_dataset_path = kwargs['scratch']['val_path']
+            dpe=""
+
         ##############
         # Dictionary #
         ##############
