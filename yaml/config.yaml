@@ -2,7 +2,7 @@ eval_only: False
 inference: False
 rl: False
 batch_size: 100
-top_peaks: 100
+top_peaks: 300
 pep_length: [0, 40]
 epochs: 40
 
@@ -12,48 +12,48 @@ epochs: 40
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-7
-lr_warmup_end: 2.e-4 # phase 2 LR
+lr_warmup_end: 1.e-4 # phase 2 LR
 lr_warmup_steps: 1000
 # Phase 2 - Flat
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 1000000 # 1000000
+lr_decay_steps: 300000 # 1000000
 
 ############################
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: #/cmnfs/proj/diffusion/experiments/2026-05-14_19-10-33 # Load weights from previous run (project path->timestamp)
-load_last: False
-new_exp: False # continue using old directory (if pev_wts) or create new one
+prev_wts: /cmnfs/proj/diffusion/experiments/2026-05-14_19-10-33 # Load weights from previous run (project path->timestamp)
+load_last: True
+new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
-save_weights: False
+save_weights: True
 high_score: aa_recall
-save_last_freq: 10000
+save_last_freq: 5400
 eval_frequency:
 # Logging
-log_wandb: False
+log_wandb: True
 wandb_entity: joellapin
-wandb_project: foundation
+wandb_project: diffusion
 
 ##################################
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2
-  train_name: 
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2
-  val_name: vigna
+  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  train_name: train
+  val_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  val_name: val
   datapath_extension: parquet/processed
   masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V2/ns_dictionary.tsv
+  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/dictionary.tsv
   synonyms:
     - [I, L]
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  num_workers: 8
+  num_workers: 4
   reverse: True
   val_steps: 100
   disperse: False
@@ -63,9 +63,9 @@ loader:
     - 'precursor_mz'
     - 'retention_time'
   scratch:
-    use: False
-    train_path: /media/storage/scratch/tempjl/9_species_V2
-    val_path: /media/storage/scratch/tempjl/9_species_V2
+    use: True
+    train_path: /media/storage/scratch/tempjl/MassiveKB
+    val_path: /media/storage/scratch/tempjl/MassiveKB
 
 ##########
 # Models #
