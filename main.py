@@ -43,6 +43,7 @@ def replace_previous_for_eval_only(config, evconfig):
     config['loader']['custom_columns'] = [] if cc == None else cc
     config['loader']['val_steps'] = evconfig['eval_only']['val_steps']
     config['loader']['disperse'] = evconfig['eval_only']['disperse']
+    config['save_weights'] = False
     return config
 
 def main():

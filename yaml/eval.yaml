@@ -5,7 +5,7 @@ eval_only:
   eval_name: vigna
   set: val # key name in D.data.dataloader/dataset
   val_steps: 100
-  disperse: False
+  disperse: True
   save: True
   stream: False
   outpath: ./hold.parquet
@@ -17,7 +17,7 @@ eval_only:
     #num_steps: 20
     #save_x: True
     #save_p: True
-    n: 5
+    #n: 5
   inference_save_keys:
     - experiment_name
     - file_index
