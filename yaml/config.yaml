@@ -13,12 +13,12 @@ lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-7
 lr_warmup_end: 2.e-4 # phase 2 LR
-lr_warmup_steps: 0
+lr_warmup_steps: 1000
 # Phase 2 - Flat
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 1400000 # 1000000
+lr_decay_steps: 1000000 # 1000000
 
 ############################
 # Loading, logging, saving #
@@ -35,19 +35,19 @@ eval_frequency:
 # Logging
 log_wandb: False
 wandb_entity: joellapin
-wandb_project: diffusion
+wandb_project: foundation
 
 ##################################
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2
+  train_dataset_path: /global/hdd/compms01/foundation/9_species_V2
   train_name: 
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2
+  val_dataset_path: /global/hdd/compms01/foundation/9_species_V2
   val_name: vigna
   datapath_extension: parquet/processed
-  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/9_species_V2/ns_dictionary.tsv
+  masses_path: /global/hdd/compms01/foundation/9_species_V2
+  dictionary_path: /global/hdd/compms01/foundation/9_species_V2/ns_dictionary.tsv
   synonyms:
     - [I, L]
     #- [D, N+0.984]

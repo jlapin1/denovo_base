@@ -37,7 +37,7 @@ class BaseDenovo:
         self.svdir = svdir
         self.rddir = rddir
         self.config['sl'] = self.config['pep_length'][1]
-        
+
         self.phase_counter = [0, 0, 0]
         if config['lr_schedule']:
             # Phase 1 warmup
@@ -610,17 +610,17 @@ class BaseDenovo:
             self.on_train_epoch_end()
             
             # Eval
-            if self.accelerator.is_local_main_process and i==(self.config['epochs']-1):
+            if self.accelerator.is_local_main_process and (self.config['log_wandb'] or i==(self.config['epochs']-1)):
                 if self.eval_frequency is None:
                     out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
                     #new_score = out[self.config["high_score"]]
                     #if self.config['save_weights']: self.checkpoint(new_score)
                 
                     # Logging
-                    #if self.config['log_wandb']:
-                    #    out['epoch'] = i+1
-                    #    wandb.log(out)
-                    #    out.pop('epoch')
+                    if self.config['log_wandb']:
+                        out['epoch'] = i+1
+                        wandb.log(out)
+                        out.pop('epoch')
                 else:
                     out = self.eval_out if hasattr(self, 'eval_out') else self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)[0]
                     #new_score = out[self.config["high_score"]]
@@ -719,6 +719,17 @@ class DenovoArObj(BaseDenovo):
 
         if self.config['rl']:
             self.make_reference_model()
+
+        if config['log_wandb'] and (config['eval_only'] == False):# and accelerator.is_local_main_process:
+            wandb.init(
+                project=config['wandb_project'],
+                entity=config['wandb_entity'],
+                config={
+                    'master': config,
+                    'save_directory': "Test in foundation",
+                    'model_parameters': self.model.total_params(),
+                },
+            )
 
     def inptarg(self, batch):
         
