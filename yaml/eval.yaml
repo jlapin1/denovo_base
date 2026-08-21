@@ -5,7 +5,7 @@ eval_only:
   eval_name: vigna
   set: val # key name in D.data.dataloader/dataset
   val_steps: 100
-  disperse: True
+  disperse: False
   save: True
   stream: False
   outpath: ./hold.parquet
