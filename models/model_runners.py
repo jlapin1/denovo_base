@@ -613,8 +613,8 @@ class BaseDenovo:
             if self.accelerator.is_local_main_process and (self.config['log_wandb'] or i==(self.config['epochs']-1)):
                 if self.eval_frequency is None:
                     out, _ = self.evaluation(dset=eval_dset, max_batches=self.val_steps, kwargs=self.eval_kwargs)
-                    #new_score = out[self.config["high_score"]]
-                    #if self.config['save_weights']: self.checkpoint(new_score)
+                    new_score = out[self.config["high_score"]]
+                    if self.config['save_weights']: self.checkpoint(new_score)
                 
                     # Logging
                     if self.config['log_wandb']:
