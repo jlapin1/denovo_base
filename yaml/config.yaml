@@ -1,10 +1,10 @@
-eval_only: True
+eval_only: False
 inference: False
 rl: False
 batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
-epochs: 100
+epochs: 40
 
 #################
 # Learning rate #
@@ -18,13 +18,13 @@ lr_warmup_steps: 20000
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
 lr_floor: 1.0e-5
-lr_decay_steps: 1400000 # 1000000
+lr_decay_steps: 1500000 # 1000000
 
 ############################
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: /cmnfs/proj/diffusion/experiments/2026-05-19_17-22-09 #2026-05-14_19-10-33 # Load weights from previous run (project path->timestamp)
+prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
@@ -41,13 +41,13 @@ wandb_project: diffusion
 # Dataset and dataloader options #
 ##################################
 loader:
-  train_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  train_dataset_path: /global/hdd/compms01/foundation/KitchenSink
   train_name: train
-  val_dataset_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
+  val_dataset_path: /global/hdd/compms01/foundation/KitchenSink
   val_name: val
-  datapath_extension: parquet/processed
-  masses_path: /cmnfs/data/proteomics/foundational_model/MassiveKB
-  dictionary_path: /cmnfs/data/proteomics/foundational_model/MassiveKB/dictionary.tsv
+  datapath_extension: parquet/v3
+  masses_path: /global/hdd/compms01/foundation/KitchenSink
+  dictionary_path: /global/hdd/compms01/foundation/KitchenSink/dictionary.tsv
   synonyms:
     - [I, L]
     #- [D, N+0.984]
@@ -70,7 +70,7 @@ loader:
 # Models #
 ##########
 encoder_name: mine # depthcharge | {other}
-decoder_name: ar # *diff* | *mdlm* | *d3pm* |*
+decoder_name: mdlm # *diff* | *mdlm* | *d3pm* |*
 
 # Encoder model
 

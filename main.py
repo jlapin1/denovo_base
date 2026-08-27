@@ -5,7 +5,8 @@ import utils as U
 import wandb
 from models.model_runners import *
 from accelerate import Accelerator
-
+import multiprocessing
+multiprocessing.set_start_method('fork') # python 3.14 compatibility with dataloader
 accelerator = Accelerator()
 
 
