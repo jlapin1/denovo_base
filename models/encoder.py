@@ -173,7 +173,7 @@ class Encoder(nn.Module):
         }
         if not self.atleast1 and prec_type is not None: 
             prec_type = None
-            print("<ENCCOMMENT> No precursors info used in model. Setting prec_type to None")
+            #print("<ENCCOMMENT> No precursors info used in model. Setting prec_type to None")
         self.main = nn.ModuleList([
             mp.TransBlock(
                 attention_dict, 

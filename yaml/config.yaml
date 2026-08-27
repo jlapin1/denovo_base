@@ -2,7 +2,7 @@ eval_only: False
 inference: False
 rl: False
 batch_size: 100
-top_peaks: 100
+top_peaks: 300
 pep_length: [0, 40]
 epochs: 40
 
@@ -12,8 +12,8 @@ epochs: 40
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-7
-lr_warmup_end: 2.e-4 # phase 2 LR
-lr_warmup_steps: 20000
+lr_warmup_end: 1.e-4 # phase 2 LR
+lr_warmup_steps: 1000
 # Phase 2 - Flat
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
@@ -26,12 +26,12 @@ lr_decay_steps: 1500000 # 1000000
 # Loading previous weights
 prev_wts: # Load weights from previous run (project path->timestamp)
 load_last: False
-new_exp: False # continue using old directory (if pev_wts) or create new one
+new_exp: True # continue using old directory (if pev_wts) or create new one
 # Saving weights
 save_weights: True
 high_score: aa_recall
-save_last_freq: 10000
-eval_frequency: 5400
+save_last_freq: 5400
+eval_frequency:
 # Logging
 log_wandb: True
 wandb_entity: joellapin
@@ -63,8 +63,9 @@ loader:
     - 'precursor_mz'
     - 'retention_time'
   scratch:
-    use: False
-    path: /media/storage/scratch/ninespecies/
+    use: True
+    train_path: /media/storage/scratch/tempjl/MassiveKB
+    val_path: /media/storage/scratch/tempjl/MassiveKB
 
 ##########
 # Models #
