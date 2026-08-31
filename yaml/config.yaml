@@ -1,7 +1,7 @@
 eval_only: False
 inference: False
 rl: False
-batch_size: 150
+batch_size: 100
 top_peaks: 100
 pep_length: [0, 40]
 epochs: 40
@@ -12,25 +12,25 @@ epochs: 40
 lr_schedule: True
 # Phase 1 - Warmup
 lr_warmup_start: 1.0e-7
-lr_warmup_end: 1.156e-4 # phase 2 LR
-lr_warmup_steps: 0
+lr_warmup_end: 2.4e-5 # phase 2 LR
+lr_warmup_steps: 0 #1000
 # Phase 2 - Flat
 lr_flat_steps: 0 #266000
 # Phase 3 - Decay
-lr_floor: 1.0e-5
-lr_decay_steps: 1210000 # 1000000
+lr_floor: 5.0e-6
+lr_decay_steps: 300000 # 1000000
 
 ############################
 # Loading, logging, saving #
 ############################
 # Loading previous weights
-prev_wts: save/2026-08-27_14-08-49 # Load weights from previous run (project path->timestamp)
-load_last: True
+prev_wts: save/2026-08-25_09-13-59 # Load weights from previous run (project path->timestamp)
+load_last: False
 new_exp: False # continue using old directory (if pev_wts) or create new one
 # Saving weights
 save_weights: False
 high_score: aa_recall
-save_last_freq: 2000
+save_last_freq: 5400
 eval_frequency: 5400
 # Logging
 log_wandb: False
@@ -53,7 +53,7 @@ loader:
     #- [D, N+0.984]
     #- [E, Q+0.984]
   buffer_size: 1000
-  num_workers: 4
+  num_workers: 2
   reverse: True
   val_steps: 100
   disperse: False
