@@ -133,7 +133,7 @@ class BaseDenovo:
                     weights_path = [m for m in glob(possible_weights_path) if 'last' in m][0]
                     qualifier = '"last"'
             
-            #print(f"<MRCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
+            print(f"<MRCOMMENT> Loading {qualifier} previous {weights_type} weights: {weights_path}")
             obj.load_state_dict(th.load(weights_path, map_location=device, weights_only=False))
 
             if retain:
@@ -150,6 +150,10 @@ class BaseDenovo:
         if self.config['prev_wts'] is not None:
             retain = False if self.config['load_last'] else True
             self.load_saved_weights(self.model, "model", self.config['load_last'], retain=retain)
+            try:
+                self.high_score = np.max([float(".".join(m.split('_')[-1].split('.')[:-1])) for m in os.listdir(os.path.join(self.rddir, "weights")) if 'high' in m]).item()
+            except:
+                self.high_score = self.high_score
             if self.config['load_last']:
                 self.load_saved_weights(self.opt, "opt", self.config['load_last'])
                 U.optimizer_to(self.opt, device)
@@ -705,9 +709,6 @@ class DenovoArObj(BaseDenovo):
         self.opt = th.optim.Adam(trainable_params, self.starting_lr)
 
         self.predict_sequence = self.model.decoder.predict_sequence
-        
-        # loading previous weights
-        self.restore_model()
         
         # loading previous weights
         self.restore_model()
