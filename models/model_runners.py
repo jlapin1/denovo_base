@@ -33,7 +33,7 @@ class BaseDenovo:
             os.makedirs(svdir)
         if self.config['save_weights']:
             if not os.path.exists(os.path.join(svdir, 'weights')):
-                os.mkdir(os.path.join(svdir, 'weights'))
+                os.makedirs(os.path.join(svdir, 'weights'), exist_ok=True)
         self.svdir = svdir
         self.rddir = rddir
         self.config['sl'] = self.config['pep_length'][1]
@@ -169,11 +169,11 @@ class BaseDenovo:
         num_processes = self.accelerator.num_processes
         gradient_accumulation_steps = self.accelerator.gradient_accumulation_steps
         self.global_batch_size = local_batch_size * num_processes * gradient_accumulation_steps
-        #if self.accelerator.is_local_main_process:
-        #    print("Batch size", local_batch_size)
-        #    print("Num processes", num_processes)
-        #    print("Accumulation steps", gradient_accumulation_steps)
-        #    print("Global batch size", self.global_batch_size)
+        if self.accelerator.is_local_main_process:
+            print("Batch size", local_batch_size)
+            print("Num processes", num_processes)
+            print("Accumulation steps", gradient_accumulation_steps)
+            print("Global batch size", self.global_batch_size)
 
 
     def split_labels_str(self, incl_str):
