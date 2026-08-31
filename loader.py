@@ -605,6 +605,8 @@ class LoaderRegr(LoaderObj):
         self.std = np.std(lst).item()
 
 if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.set_start_method('fork') # python 3.14 compatibility with dataloader
     import sys
     if len(sys.argv)==1:
         num_workers=0
@@ -612,12 +614,14 @@ if __name__ == '__main__':
         num_workers=int(sys.argv[1])
 
     loader = LoaderHF(
-        train_dataset_path = "/cmnfs/data/proteomics/foundational_model/KitchenSink",
+        train_dataset_path = "/global/hdd/compms01/foundation/KitchenSink",
         train_name = 'train',
-        val_dataset_path = "/cmnfs/data/proteomics/foundational_model/KitchenSink",
+        val_dataset_path = "/global/hdd/compms01/foundation/KitchenSink",
         val_name = 'val',
-        dictionary_path = "/cmnfs/data/proteomics/foundational_model/KitchenSink/dictionary.tsv",
+        dictionary_path = "/global/hdd/compms01/foundation/KitchenSink/dictionary.tsv",
         datapath_extension = "parquet/v3",
+        masses_path = "/global/hdd/compms01/foundation/KitchenSink",
+        tokenizer_path = "/global/hdd/compms01/foundation/KitchenSink",
         num_workers=num_workers,
     )
     
