@@ -6,7 +6,7 @@ eval_only:
   set: val # key name in D.data.dataloader/dataset
   val_steps: 100
   disperse: True
-  save: True
+  save: False
   stream: False
   outpath: ./hold.parquet
   # diffusion only

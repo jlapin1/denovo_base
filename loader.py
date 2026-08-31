@@ -203,8 +203,8 @@ class LoaderHF(LoaderObj):
             masses_path = train_dataset_path
         tokenizer_path = train_dataset_path if tokenizer_path==None else tokenizer_path
         max_seq = pep_length[1] if pep_length is not None else None
-        assert os.path.exists(join(train_dataset_path, dpe)), "Train dataset path doesn't exist"
-        assert os.path.exists(join(val_dataset_path, dpe)), "Train dataset path doesn't exist"
+        assert os.path.exists(join(train_dataset_path, dpe)), f"Train dataset path '{join(train_dataset_path, dpe)}' doesn't exist"
+        assert os.path.exists(join(val_dataset_path, dpe)), f"Val dataset path '{join(train_dataset_path, dpe)}' doesn't exist"
 
         if 'scratch' in kwargs and kwargs['scratch']['use']:
             train_dataset_path = kwargs['scratch']['train_path']
@@ -604,3 +604,32 @@ class LoaderRegr(LoaderObj):
         self.mean = np.mean(lst).item()
         self.std = np.std(lst).item()
 
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv)==1:
+        num_workers=0
+    else:
+        num_workers=int(sys.argv[1])
+
+    loader = LoaderHF(
+        train_dataset_path = "/cmnfs/data/proteomics/foundational_model/KitchenSink",
+        train_name = 'train',
+        val_dataset_path = "/cmnfs/data/proteomics/foundational_model/KitchenSink",
+        val_name = 'val',
+        dictionary_path = "/cmnfs/data/proteomics/foundational_model/KitchenSink/dictionary.tsv",
+        datapath_extension = "parquet/v3",
+        num_workers=num_workers,
+    )
+    
+    
+    from time import time
+    for n, batch in enumerate(loader.dataloader['train']):
+        print(f"\r{n}/100", end="")
+        if n==10:
+            start = time()
+            batch_size = batch['mz'].shape[0]
+        if n==110:
+            elapsed = time() - start
+            print()
+            break
+    print(f"{(batch_size*100) / elapsed} spectra/second")
