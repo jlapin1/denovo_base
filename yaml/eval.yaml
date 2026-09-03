@@ -4,7 +4,7 @@ eval_only:
   datapath_extension: parquet/processed
   eval_name: vigna
   set: val # key name in D.data.dataloader/dataset
-  val_steps: 100
+  val_steps: 1000
   disperse: True
   save: False
   stream: False

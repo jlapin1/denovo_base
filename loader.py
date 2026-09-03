@@ -605,6 +605,8 @@ class LoaderRegr(LoaderObj):
         self.std = np.std(lst).item()
 
 if __name__ == '__main__':
+    #import multiprocessing
+    #multiprocessing.set_start_method('fork') # python 3.14 compatibility with dataloader
     import sys
     if len(sys.argv)==1:
         num_workers=0
