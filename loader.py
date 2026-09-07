@@ -235,8 +235,12 @@ class LoaderHF(LoaderObj):
         # - RULES
         #   1. There is a file that matches the regex *sizes.tsv in the train_dataset_path and val_dataset_path
         #   2. val_name will pick out 1 file's size from the val_dataset_path
-        self.train_size = self.find_set_size_for_tqdm(join(train_dataset_path, dpe), train_name, val_name, "*species*size*tsv")
-        self.val_size = self.find_set_size_for_tqdm(join(val_dataset_path, dpe), val_name, regex="*species*size*tsv")
+        try:
+            self.train_size = self.find_set_size_for_tqdm(join(train_dataset_path, dpe), train_name, val_name, "*species*size*tsv")
+            self.val_size = self.find_set_size_for_tqdm(join(val_dataset_path, dpe), val_name, regex="*species*size*tsv")
+        except:
+            self.train_size = None
+            self.val_size = None
         
         ###########
         # Dataset #

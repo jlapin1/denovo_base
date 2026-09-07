@@ -485,10 +485,14 @@ class Diffusion:
       gamma=1.,
       save_x=False, 
       save_p=False, 
-      progress=False
+      progress=False,
+      batch_size=None,
   ):
       """Generate samples from the model."""
-      batch_size_per_gpu = len(model_kwargs['charge'])
+      try:
+          batch_size_per_gpu =  len(model_kwargs['charge'])
+      except:
+          batch_size_per_gpu = batch_size
       
       if self.parameterization == 'ar':
           return self._ar_sampler(batch_size_per_gpu)

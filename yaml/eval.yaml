@@ -1,10 +1,10 @@
 # Number of batches in loader is set in config.yaml:loader
 eval_only:
-  eval_dataset_path: /cmnfs/data/proteomics/foundational_model/9_species_V2 # None: use config.yaml setting, else: override
+  eval_dataset_path: /global/hdd/compms01/foundation/9_species_V2 # None: use config.yaml setting, else: override
   datapath_extension: parquet/processed
   eval_name: vigna
   set: val # key name in D.data.dataloader/dataset
-  val_steps: 1000
+  val_steps: 100
   disperse: True
   save: False
   stream: False

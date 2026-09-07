@@ -170,10 +170,10 @@ class BaseDenovo:
         gradient_accumulation_steps = self.accelerator.gradient_accumulation_steps
         self.global_batch_size = local_batch_size * num_processes * gradient_accumulation_steps
         if self.accelerator.is_local_main_process:
-            print("Batch size", local_batch_size)
-            print("Num processes", num_processes)
-            print("Accumulation steps", gradient_accumulation_steps)
-            print("Global batch size", self.global_batch_size)
+            #print("Batch size", local_batch_size)
+            #print("Num processes", num_processes)
+            #print("Accumulation steps", gradient_accumulation_steps)
+            print("<MRCOMMENT> Accelerate: Global batch size", self.global_batch_size)
 
 
     def split_labels_str(self, incl_str):
@@ -188,7 +188,7 @@ class BaseDenovo:
         running_loss = {key: deque(maxlen=20) for key in self.training_loss_keys}
         
         # Progress bar
-        train_steps = int(self.data.train_size // bs)
+        train_steps = int(self.data.train_size // bs) if self.data.train_size is not None else None
         pbar = tqdm(
             self.data.dataloader['train'],
             total=train_steps,
@@ -464,7 +464,7 @@ class BaseDenovo:
         val_steps = min(
             self.data.val_size // self.data.dataloader[dset].batch_size,
             max_batches,
-        )
+        ) if self.data.val_size != None else None
         pbar = tqdm(
             self.data.dataloader[dset], 
             total=val_steps, 
@@ -519,9 +519,10 @@ class BaseDenovo:
             }
 
             # PPM
-            pred_masses = self.model.decoder.scale.intseq2mz(prediction, batch['charge'].to(device))
-            ppms = U.deltaPPM(batch['mass'].to(device), pred_masses)
-            out['ppm'] += ppms.sum()
+            if 'charge' in batch:
+                pred_masses = self.model.decoder.scale.intseq2mz(prediction, batch['charge'].to(device))
+                ppms = U.deltaPPM(batch['mass'].to(device), pred_masses)
+                out['ppm'] += ppms.sum()
 
             # Add to totals
             for metric in dn_metrics['sum'].keys():
@@ -540,20 +541,20 @@ class BaseDenovo:
                 if 'hyperscore' in batch:
                     if 'hyperscore' not in dataframe: dataframe['hyperscore'] = []
                     dataframe['hyperscore'].extend(batch['hyperscore'].cpu().numpy().tolist())
-                dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
-                dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
-                dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
-                dataframe['targ_intseq'].extend(batch['intseq'].cpu().numpy().tolist())
+                if 'charge' in batch: dataframe['charge'].extend(batch['charge'].cpu().numpy().tolist())
+                if 'mass' in batch: dataframe['mass'].extend(batch['mass'].cpu().numpy().tolist())
+                if 'peplen' in batch: dataframe['peptide_length'].extend(batch['peplen'].cpu().numpy().tolist())
+                if 'intseq' in batch: dataframe['targ_intseq'].extend(batch['intseq'].cpu().numpy().tolist())
                 dataframe['pred_intseq'].extend(prediction.cpu().numpy().tolist())
                 dataframe['probs'].extend(predicted_probs.cpu().numpy().tolist())
-                dataframe['ppm'].extend(ppms.cpu().numpy().tolist())
+                if 'charge' in batch: dataframe['ppm'].extend(ppms.cpu().numpy().tolist())
                 dataframe['targ_aaseq'].extend(targ_strings)
                 dataframe['pred_aaseq'].extend(pred_strings)
                 dataframe['correct_aa'].extend([result[0] for result in aa_matches_batch])
                 dataframe['correct_peptide'].extend([result[1] for result in aa_matches_batch])
                 
                 # Prevent error at the end of evaluation when not streaming
-                length_first = len(dataframe['charge'])
+                length_first = len(dataframe['pred_intseq'])
                 array = np.array([len(value) for key, value in dataframe.items()])
                 assert (length_first == array).all(), f"batch#: {i}, {dataframe.keys()}, {array}"
 				
@@ -579,7 +580,7 @@ class BaseDenovo:
         steps = i+1
         totsz = self.config['batch_size']*steps
         out['ce'] = float((out['ce'] / (totsz * self.config['sl'])).cpu().detach().numpy())
-        out['ppm'] = out['ppm'].cpu().item() / totsz
+        if 'charge' in batch: out['ppm'] = out['ppm'].cpu().item() / totsz
         for metric in tots['sum'].keys():
             out[metric] = float(tots['sum'][metric] /  tots['total'][metric])
         
@@ -623,7 +624,7 @@ class BaseDenovo:
                     new_score = out[self.config["high_score"]]
             
                 specifier = " ".join(len(out)*['%s'])
-                write_out = specifier%tuple([f"{m}={n:.3}" for m,n, in out.items()])
+                write_out = specifier%tuple([f"{m}={n:.3f}" for m,n, in out.items()])
                 line = "ValEpoch %d: %s"%(i, write_out)
                 
                 if (new_score > self.high_score):
@@ -1047,7 +1048,7 @@ class DenovoMDLMObj(BaseDenovo):
         if self.diff_config['custom_loss']:
             model_output, weights, masked_token_mask, timesteps = self._model(batch, target, training_mask, block_decoding)
             loss = F.cross_entropy(model_output.transpose(-1,-2), target, reduction='none')
-            weights = (target!=self.model.decoder.NT).float() + 0.01*(target==self.model.decoder.NT).float()
+            weights = (target!=self.model.decoder.NT).float() + 1.*(target==self.model.decoder.NT).float()
             loss = (weights*loss)[masked_token_mask]
             token_loss = loss.mean()
             other_losses = {'token_loss': token_loss.item()}

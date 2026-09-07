@@ -546,8 +546,8 @@ class MDLMDecoder(base_diffusion_decoder):
         x,
         timesteps,
         kv_features,
-        charge,
-        mass,
+        charge=None,
+        mass=None,
         sa_cache=None,
         specmask=None,
         seqmask=None,
@@ -584,7 +584,7 @@ class MDLMDecoder(base_diffusion_decoder):
     
     def predict_sequence(self, embedding, batch, x_init=None, save_x=False, save_p=False, top=None, num_steps=None, progress=False, **kwargs):
         if 'batch_size' in kwargs:
-            bs = kwargs.pop('batch_size')
+            bs = kwargs['batch_size']
         if embedding is not None:
             bs = embedding.shape[0]
             dev = embedding.device

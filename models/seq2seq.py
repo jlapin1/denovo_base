@@ -77,11 +77,14 @@ def reshape_top_k(tensor, k):
         return tensor.reshape(-1,k,b,c,d)
 
 def expand_batch(batch, n=1):
-    bs, sl = batch['mz'].shape
-    batch['mz'] = batch['mz'][:,None].tile(1, n, 1).reshape(-1, sl)
-    batch['ab'] = batch['ab'][:,None].tile(1, n, 1).reshape(-1, sl)
-    batch['charge'] = batch['charge'][:,None].tile(1, n).reshape(-1)
-    batch['mass'] = batch['mass'][:,None].tile(1, n).reshape(-1)
+    if 'mz' in batch or 'ab' in batch:
+        bs, sl = batch['mz'].shape
+        batch['mz'] = batch['mz'][:,None].tile(1, n, 1).reshape(-1, sl)
+        batch['ab'] = batch['ab'][:,None].tile(1, n, 1).reshape(-1, sl)
+    if 'charge' in batch:
+        batch['charge'] = batch['charge'][:,None].tile(1, n).reshape(-1)
+    if 'mass' in batch:
+        batch['mass'] = batch['mass'][:,None].tile(1, n).reshape(-1)
     if 'length' in batch:
         batch['length'] = batch['length'][:,None].tile(1, n).reshape(-1)
     if 'peplen' in batch:
@@ -397,13 +400,19 @@ class Seq2SeqMDLM(Seq2Seq):
         else:
             embedding = spectrum_mask = None
         model_kwargs = {
-            'charge': batch['charge'] if 'charge' in batch else None,
-            'mass': batch['mass'] if 'mass' in batch else None,
             'kv_features': embedding,
             'seqmask': training_mask,
             'doubled': True if block_decoding else False,
         }
-        model_kwargs = self.dropout_attributes(model_kwargs)
+        tick=0
+        if 'charge' in batch:
+            model_kwargs['charge'] = batch['charge']
+            tick+=1
+        if 'mass' in batch:
+            model_kwargs['mass'] = batch['mass']
+            tick+=1
+        if tick>0:
+            model_kwargs = self.dropout_attributes(model_kwargs)
         return forward_function(target, model_kwargs, block_decoding)
 
     def predict_sequence(
@@ -421,7 +430,7 @@ class Seq2SeqMDLM(Seq2Seq):
         gamma: int=1.,              # scaler for guidance
     ):
         # Input batch
-        batch_size, SL = batch['mz'].shape if 'mz' in batch else (batch['charge'].shape[0] if 'charge' in batch else batch_size)
+        batch_size, _ = batch['mz'].shape if 'mz' in batch else (batch['intseq'].shape if 'intseq' in batch else batch_size)
         n = self.ens_size if n==None else n
         batch = expand_batch(batch, n=n)
         
