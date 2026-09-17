@@ -10,7 +10,7 @@ import os
 import types
 import importlib
 
-FOUNDATIONAL_ROOT = "/global/home/lapj/foundation"
+FOUNDATIONAL_ROOT = os.getcwd()
 _PKG_NAME = "foundational_models"
 
 if _PKG_NAME not in sys.modules:
